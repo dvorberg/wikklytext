@@ -1,0 +1,10 @@
+Hallo Welt, ich bin der erste Absatz.
+
+Ich bin deutscher Text. <<de "I am English text.">> Ich bin wieder deutscher Text.
+
+<<bild "hallo.jpg">>
+
+<<macro 12 'Single single quote string' '''Tripple single quote string
+with possible newlines in it''' "Single double quote string" """Tritpple double quote string""" identifyer filename.jpg 12.21 http://www.prima.de>>
+
+Ich bin der letzte Absatz. 
