@@ -1,11 +1,8 @@
-from wikklytext.to_html import WikklyToHTML
+from wikklytext import to_html
 
 def main():
-    wcontext = None
-    converter = WikklyToHTML(wcontext)
-
     with open("every_markup.wikkly") as fp:
-        converter.parse(fp.read())
+        wikkly = fp.read()
 
     print('<!DOCTYPE html>')
     print('<html>',
@@ -14,7 +11,7 @@ def main():
           '</head>',
           '<body>',
           sep="\n")
-    print(converter.output.getvalue())
+    print(to_html(wikkly))
     print('</body>', '</html>', sep="\n")
 
 

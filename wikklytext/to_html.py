@@ -1,7 +1,19 @@
 import re, html
 from io import StringIO
 
-from .parser import WikklyParser
+from .parser import Context, WikklyParser
+from .macros import BlockLevelMacro
+
+def to_html(wikkly, context:Context=None):
+    converter = WikklyToHTML(context)
+    converter.parse(wikkly)
+    return converter.get_html()
+
+def to_inline_html(wikkly, context:Context=None):
+    converter = WikklyToInlineHTML(context)
+    converter.parse(wikkly)
+    return converter.get_html()
+
 
 class WikklyToHTML(WikklyParser):
     block_level_tags = { "div", "p", "ol", "ul", "li", "blockquote", "code",
@@ -11,13 +23,13 @@ class WikklyToHTML(WikklyParser):
 
     paragraph_break_re = re.compile("\n\n+")
 
-    def __init__(self, wcontext):
-        self.wcontext = wcontext
+    def __init__(self, context=None):
+        super().__init__(context)
         self.output = StringIO()
-
         self.tag_stack = []
 
     def print(self, *args, **kw):
+        print("--", repr(args), repr(kw))
         print(*args, **kw, file=self.output)
 
     def get_html(self):
@@ -53,16 +65,20 @@ class WikklyToHTML(WikklyParser):
             end = "\n"
         else:
             end = ""
+
         self.print(f"</{tag}>", end=end)
 
         assert self.tag_stack.pop() == tag, ValueError
 
+    def close_all(self):
+        while self.tag_stack:
+            self.close(self.tag_stack[-1])
 
     def beginDoc(self):
-        pass
+        self.open("p")
 
     def endDoc(self):
-        pass
+        self.close_all()
 
     def beginBold(self): self.open("b")
     def endBold(self): self.close("b")
@@ -115,17 +131,11 @@ class WikklyToHTML(WikklyParser):
         self.close(f"h{self._current_heading_level}")
         self._current_heading_level = None
 
-    def beginBlockIndent(self):
+    def beginBlockquote(self):
         self.open("blockquote")
 
-    def endBlockIndent(self):
+    def endBlockquote(self):
         self.close("blockquote")
-
-    def beginLineIndent(self):
-        self.open("div", class_="wikkly-line-indent")
-
-    def endLineIndent(self):
-        self.close("div")
 
     def handleLink(self, A, B=None):
         # print("handleLink A=%s, B=%s" % (A,B))
@@ -200,6 +210,7 @@ class WikklyToHTML(WikklyParser):
         self.print("<hr />", end="")
 
     def EOLs(self, txt):
+        print("EOLs!!", repr(txt))
         # We ignore \n
         # print("**", repr(txt))
         if self.paragraph_break_re.match(txt) is not None:
@@ -210,11 +221,37 @@ class WikklyToHTML(WikklyParser):
         self.print("<br />", end="")
 
     def characters(self, txt):
-        if len(self.tag_stack) == 0:
-            # We’re on top level.
-            self.open("p")
-
         self.print(txt, end="")
 
-    def macro(self, name, args, kw):
-        print("macro: ", name, args, kw)
+    def call_macro(self, macro, args, kw):
+        result = macro.html(args, kw)
+
+        if isinstance(macro, BlockLevelMacro):
+            self.close_all()
+            self.print("\n", result)
+        else:
+            self.print(result, end="")
+
+
+    def callStartTagMacro(self, macro, args, kw):
+        self.open("span", **macro.span_params(args, kw))
+
+    def endStartTagMacro(self):
+        self.close("span")
+
+
+class WikklyToInlineHTML(WikklyToHTML):
+    def beginDoc(self):
+        # Do no create the top-level "p".
+        pass
+
+    def endDoc(self):
+        # Conversely to characters() not opening a top-level "p",
+        # there is no need to close it.
+        pass
+
+    def open(self, tag, **params):
+        if tag in self.block_level_tags:
+            raise RestrictionError("You may only use inline markup "
+                                   "in this context.")
+        super().open(tag, **params)

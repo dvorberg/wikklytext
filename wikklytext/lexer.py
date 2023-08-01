@@ -26,7 +26,6 @@ GNU General Public License for more details.
 #   ^^  : Superscript start/end
 #   ~~  : Subscript start/end
 #   @@  : Highlight start/end
-#   {{name{ : CSS block start
 #   ^[#]+ : Numbered list item
 #   ^[*]+ : Unnumbered list item
 #   ^[!]+ : Heading
@@ -64,8 +63,10 @@ GNU General Public License for more details.
 #   .     : Any other character
 #
 
-import time, re
-import ply.lex as lex
+import sys, time, re
+
+from .exceptions import SyntaxError
+from .baselexer import lex
 
 whitespace_re = re.compile(r"\s+")
 
@@ -77,19 +78,15 @@ class WikklyLexer(object):
         'UNDERLINE',
         'SUPERSCRIPT',
         'SUBSCRIPT',
-        'HIGHLIGHT_CSS',
-        'HIGHLIGHT_COLOR',
-        'HIGHLIGHT_BG',
-        'HIGHLIGHT_DEFAULT',
         'N_LISTITEM',
         'U_LISTITEM',
         'HEADING',
         'D_TERM',
         'D_DEFINITION',
-        #'MACRO',
-        'PYTHON_EMBED',
+        'MACRO',
+        'START_TAG_MACRO_START',
+        'START_TAG_MACRO_END',
         'BLOCK_INDENT',
-        'LINE_INDENT',
         'LINK_AB',
         'LINK_A',
         'IMGLINK_TFU',
@@ -141,7 +138,6 @@ class WikklyLexer(object):
     )
 
     t_BLOCK_INDENT = r"^<<<\s+|^>>>\s+"
-    t_LINE_INDENT = r"^([>]+)"
     t_HTML_COMMENT_START = r'^<!---\n'
     t_HTML_COMMENT_END = r'^--->\n'
     t_SEPARATOR = r"^\s*---[-]+\s*"
@@ -162,10 +158,6 @@ class WikklyLexer(object):
     # careful on matching - easy to mix up with the other @@ forms
     # (this is not the full set of property names allowed by CSS, but
     # should cover most real uses)
-    t_HIGHLIGHT_CSS = r'@@((\s*[a-zA-Z][a-zA-Z0-9-]*\s*:.+?;)+)'
-    t_HIGHLIGHT_COLOR = r'@@color\((.+?)\):' # @@color(color): ...@@
-    t_HIGHLIGHT_BG = r'@@bgcolor\((.+?)\):'  # @@bgcolor(color): .. @@
-    t_HIGHLIGHT_DEFAULT = r"@@"
     #t_IMGSTART = r"\[img\["
 
     # a CSS block ({{class{ .. text ..}}}) is superficially similar to a CODE
@@ -206,7 +198,9 @@ class WikklyLexer(object):
     t_TEXT = r"."
 
     def __init__(self):
-        self.lexer = lex.lex(object=self, reflags=re.M|re.I|re.S)
+        self.lexer = lex(object=self,
+                         reflags=re.M|re.I|re.S,
+                         optimize=True) # optimize?
 
     def tokenize(self, source):
         self.lexer.input(source)
@@ -263,17 +257,6 @@ class WikklyLexer(object):
         r"^\s*[:]+\s*"
         t.rawtext = t.value
         t.value = t.value.strip()
-        return t
-
-    # Strict parsing: '<?py' must begin a line and '?>'
-    # must end a line. No nesting allowed, so
-    # I just grab the whole thing at once.
-    def t_PYTHON_EMBED(self, t):
-        r"^\s*<\?py.*?\?>\s*$"
-        t.rawtext = t.value
-        # save code in t.value
-        m = re.match(r"^\s*<\?py(.*?)\?>\s*$",t.value,re.M|re.I|re.S)
-        t.value = m.group(1)
         return t
 
     # link: [[A]]
@@ -345,13 +328,45 @@ class WikklyLexer(object):
         r"<<[a-z_]+"
 
         macro_name = t.value[2:]
-        args, kw, remainder = parse_macro_parameter_list_from(
-            self.lexer.lexdata[self.lexer.lexpos:])
+        remainder, args, kw = parse_macro_parameter_list_from(
+            t.lineno, self.lexer.lexdata[self.lexer.lexpos:], ">>")
         self.lexer.input(remainder)
 
-        t.type = 'MACRO'
         t.value = macro_name, args, kw
         return t
+
+    def t_START_TAG_MACRO_START(self, t):
+        # The syntax is
+        #
+        #     @@identifier: more Wikkly@@.
+        #
+        # The identifier may be accompanied by a parameter list in parentheses:
+        #
+        #     @@identifyer('Something'): more Wikkly@@.
+        #
+        r"@@([^\d\W][\w]+)(\(?)"
+
+        macro_name = t.value[2:]
+        if macro_name.endswith("("):
+            macro_name = macro_name[:-1]
+
+            remainder, args, kw = parse_macro_parameter_list_from(
+                t.lineno, " " + self.lexer.lexdata[self.lexer.lexpos:], "):")
+            self.lexer.input(remainder)
+        else:
+            if self.lexer.lexdata[self.lexer.lexpos] != ":":
+                raise SyntaxError("Missing “:” in start tag macro call.",
+                                  lineno=t.lineno)
+            else:
+                self.lexer.lexpos += 1
+
+            args = ()
+            kw = {}
+
+        t.value = macro_name, args, kw
+        return t
+
+    t_START_TAG_MACRO_END = r"@@"
 
     #def t_WIKIWORD_ESC(self, t):
     #   r"~[a-z][a-z0-9_]+"
@@ -386,9 +401,6 @@ class WikklyLexer(object):
         t.value = t.value.replace(' ','').replace('\t','')
 
         return t
-
-wikkly_lexer = WikklyLexer()
-
 
 	# def prepare_input(self, txt):
 	# 	# for simplicity in regexes, remove all '\r' chars
@@ -426,35 +438,53 @@ wikkly_lexer = WikklyLexer()
 	# #	return txt.replace('<','&lt;')
 	# #	#return txt
 
-macro_parameter_re = re.compile(
-    r"^\s+'''(.*?)'''|"
-    r'^\s+"""(.*?)"""|'
-    r"^\s+'(.*?)'|"
-    r'^\s+"(.*?)"|'
-    r"^\s+([^'\">\s]+)|"
-    r"^\s*(>>)", re.DOTALL)
-def parse_macro_parameter_list_from(source):
+macro_parameter_re = re.compile(r"""
+    ^\s+                 # Every param, including the first, has leading space.
+      (?:([^\d\W]\w*)=)? # Optional “identifyer=”. No whitespace around the “=”.
+      (?:'''(.*?)''' |       # a
+         \"\"\"(.*?)\"\"\" | # b
+         '(.*?)' |           # c
+         "(.*?)" |           # d
+         ([^'">:\)\s]+)      # e
+                         # All the string literal types …
+      ) |                # … OR …
+    ^\s*(>>|\):)         # the end of the macro/@@id(): construct.
+    """, re.DOTALL | re.VERBOSE)
+def parse_macro_parameter_list_from(lineno, source, end_marker):
     """
     Return a tipplet as (args, kw, remainder,)
     """
     args = []
-    source = self.lexer.lexdata[self.lexer.lexpos:]
+    kw = {}
     while True:
         match = macro_parameter_re.search(source)
 
         if match is None:
-            raise Exception("Syntax error in macro paramter. Source: %s" % (
-                repr(source[:30])))
+            raise SyntaxError("Syntax error in macro paramter",
+                              lineno, looking_at=source)
         else:
             found = len(match.group(0))
+            keyword, a, b, c, d, e, end = match.groups()
 
-            if match.group(6): # Found ">>")
+            if end:
+                if end != end_marker:
+                    raise SyntaxError(f"Syntax error, can’t parse “{end}” in "
+                                      f"macro parameter list.",
+                                      lineno, looking_at=source)
+                source = source[len(end):]
                 break
 
-            for a in ( 1, 2, 3, 4, 5, ):
-                arg = match.group(a)
-                if arg:
-                    args.append(arg)
-                    break
+            arg = a or b or c or d or e
+
+            if keyword is None:
+                if kw:
+                    raise SyntaxError("Syntax error: positional argument "
+                                      "follows named argument.",
+                                      lineno, looking_at=source)
+                args.append(arg)
+            else:
+                kw[keyword] = arg
 
             source = source[found:]
+
+    return source, args, kw,

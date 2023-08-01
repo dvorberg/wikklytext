@@ -19,7 +19,16 @@ GNU General Public License for more details.
 """
 
 import re
-from .lexer import wikkly_lexer
+from .exceptions import WikklyError, UnknownMacro
+from .lexer import WikklyLexer
+from .macros import MacroLibrary
+
+class Context(object):
+    def __init__(self, macro_library:MacroLibrary=None):
+        if macro_library is None:
+            self.macro_library = MacroLibrary()
+        else:
+            self.macro_library = macro_library
 
 class WikklyParser(object):
     """
@@ -28,6 +37,14 @@ class WikklyParser(object):
     You can also instantiate this by itself to show a trace of the
     tokens from the lexer.
     """
+    def __init__(self, context:Context=None):
+        self.lexer = WikklyLexer()
+
+        if context is None:
+            self.context = Context()
+        else:
+            self.context = context
+
     def beginDoc(self):
         print("beginDoc")
 
@@ -212,8 +229,14 @@ class WikklyParser(object):
     def characters(self, txt):
         print("chars: ", repr(txt))
 
-    def macro(self, name, args, kw):
-        print("macro: ", name, args, kw)
+    def call_macro(self, macro, args, kw):
+        print("macro: ", repr(macro), args, kw)
+
+    def callStartTagMacro(self, macro, args, kw):
+        print("callStartTagMacro: ", repr(macro), args, kw)
+
+    def endStartTagMacro(self):
+        print("end start tag macro")
 
     def error(self, message, looking_at=None, trace=None):
         """
@@ -248,6 +271,9 @@ class WikklyParser(object):
             self.beginCodeInline()
             self.characters(text)
             self.endCodeInline()
+
+    def finalize(self):
+        pass
 
     def parse(self, source):
         # flags:
@@ -291,7 +317,7 @@ class WikklyParser(object):
 
         self.beginDoc()
 
-        for tok in wikkly_lexer.tokenize(source):
+        for tok in self.lexer.tokenize(source):
             # check for EOF or over time limit
             if tok is None:
                 # close any open lists
@@ -345,9 +371,6 @@ class WikklyParser(object):
                             self.error("ERROR input ended inside %s" % s,
                                          '', '')
 
-                self.endDoc()
-                break
-
             # while in blockquote, hand parser raw chars
             #if self.in_blockquote and tok.type != 'BLOCKQUOTE':
             #   if hasattr(tok,'rawtext'):
@@ -387,16 +410,6 @@ class WikklyParser(object):
             #   if tok.type != 'TABLEROW_START' or len(last_token[1]) > 1:
             #       self.endTable()
             #       in_table = 0
-
-            # if just ended a line, and inside a line-indent,
-            # and NOT starting a new
-            # line-indent, end indented section
-            if last_token[0] == 'EOLS' and in_line_indent:
-                if tok.type != 'LINE_INDENT':
-                    # close all nested blocks
-                    while in_line_indent:
-                        self.endLineIndent()
-                        in_line_indent -= 1
 
             # if just ended a line, and inside a definition list,
             # and NOT starting a new definition item, end list
@@ -502,53 +515,16 @@ class WikklyParser(object):
                     self.beginSubscript()
                     in_subscript = 1
 
-            elif tok.type == 'HIGHLIGHT_DEFAULT':
-                # can be end of any other "@@" style,
-                # or the start of the default style
-                if in_highlight:
-                    self.endHighlight()
-                    in_highlight = 0
-                else:
-                    # begin default highlight style
-                    self.beginHighlight()
-                    in_highlight = 1
+            elif tok.type == "START_TAG_MACRO_END":
+                self.endStartTagMacro()
 
-            elif tok.type in ['HIGHLIGHT_CSS', 'HIGHLIGHT_COLOR',
-                              'HIGHLIGHT_BG']:
-                #print "TOKEN",tok.type,tok.value
-                if in_highlight:
-                    # the '@@' is the end of the highlight - reparse remainder
-                    txt = self.lexer.lexdata[self.lexer.lexpos:]
-                    self.lexer.input(tok.value[2:] + txt)
-                    self.endHighlight()
-                    in_highlight = 0
-                else:
-                    # send style to parser so it knows what kind of element
-                    # to create
-                    self.beginHighlight(tok.value)
-                    in_highlight = 1
-
-            #elif tok.type == 'BLOCKQUOTE':
-            elif tok.type == 'BLOCK_INDENT':
+            elif tok.type == 'BLOCKQUOTE':
                 if in_block_indent:
-                    self.endBlockIndent()
+                    self.endBlockquote()
                     in_block_indent = 0
                 else:
-                    self.beginBlockIndent()
+                    self.beginBlockquote()
                     in_block_indent = 1
-
-            elif tok.type == 'LINE_INDENT':
-                # get >> chars
-                m = re.match(wikkly_lexer.t_LINE_INDENT, tok.value)
-                # adjust new new nesting level
-                nr = len(m.group(1))
-                while nr > in_line_indent:
-                    self.beginLineIndent()
-                    in_line_indent += 1
-
-                while nr < in_line_indent:
-                    self.endLineIndent()
-                    in_line_indent -= 1
 
             elif tok.type == 'HTML_ESCAPE':
                 m = re.match(self.t_HTML_ESCAPE, tok.value, re.M|re.I|re.S)
@@ -662,7 +638,7 @@ class WikklyParser(object):
 
                 else:
                     # cannot reach ... if my logic is correct :-)
-                    raise WikError("** INTERNAL ERROR in N_LISTITEM **")
+                    raise WikklyError("** INTERNAL ERROR in N_LISTITEM **")
 
             elif tok.type == 'U_LISTITEM':
                 # (see comments in N_LISTITEM)
@@ -727,7 +703,7 @@ class WikklyParser(object):
 
                 else:
                     # cannot reach ... if my logic is correct :-)
-                    raise WikError("** INTERNAL ERROR in N_LISTITEM **")
+                    raise WikklyError("** INTERNAL ERROR in N_LISTITEM **")
 
             elif tok.type == 'HEADING':
                 # inside a table, this is a regular char
@@ -752,7 +728,7 @@ class WikklyParser(object):
                 self.handleImgLink(*tok.value)
 
             elif tok.type == 'CSS_BLOCK_START':
-                m = re.match(wikkly_lexer.t_CSS_BLOCK_START,
+                m = re.match(self.lexer.t_CSS_BLOCK_START,
                              tok.value, re.M|re.S|re.I)
                 name = m.group(1)
                 # push on stack
@@ -806,7 +782,7 @@ class WikklyParser(object):
 
             elif tok.type == 'CODE_BLOCK':
                 # regex grabs entire block since no nesting allowed
-                m = re.match(wikkly_lexer.t_CODE_BLOCK,
+                m = re.match(self.lexer.t_CODE_BLOCK,
                              tok.value, re.M|re.I|re.S)
                 text = m.group(1)
 
@@ -814,7 +790,7 @@ class WikklyParser(object):
 
             elif tok.type == 'CODE_BLOCK_CSS':
                 # regex grabs entire block since no nesting allowed
-                m = re.match(wikkly_lexer.t_CODE_BLOCK_CSS, tok.value,
+                m = re.match(self.lexer.t_CODE_BLOCK_CSS, tok.value,
                              re.M|re.I|re.S)
                 text = m.group(1)
 
@@ -822,7 +798,7 @@ class WikklyParser(object):
 
             elif tok.type == 'CODE_BLOCK_CPP':
                 # regex grabs entire block since no nesting allowed
-                m = re.match(wikkly_lexer.t_CODE_BLOCK_CPP, tok.value,
+                m = re.match(self.lexer.t_CODE_BLOCK_CPP, tok.value,
                              re.M|re.I|re.S)
                 text = m.group(1)
 
@@ -830,7 +806,7 @@ class WikklyParser(object):
 
             elif tok.type == 'CODE_BLOCK_HTML':
                 # regex grabs entire block since no nesting allowed
-                m = re.match(wikkly_lexer.t_CODE_BLOCK_HTML, tok.value,
+                m = re.match(self.lexer.t_CODE_BLOCK_HTML, tok.value,
                              re.M|re.I|re.S)
                 text = m.group(1)
 
@@ -871,7 +847,7 @@ class WikklyParser(object):
             elif tok.type == 'TABLEROW_END':
                 if not self.in_table:
                     # split | portion from "\n" portion
-                    m = re.match(wikkly_lexer.t_TABLEROW_END, tok.value, re.M|re.I|re.S)
+                    m = re.match(self.lexer.t_TABLEROW_END, tok.value, re.M|re.I|re.S)
                     self.characters(m.group(1))
                     # feed \n back to parser
                     txt = self.lexer.lexdata[self.lexer.lexpos:]
@@ -885,7 +861,7 @@ class WikklyParser(object):
             elif tok.type == 'TABLE_END':
                 if not self.in_table:
                     # split | portion from "\n" portion
-                    m = re.match(wikkly_lexer.t_TABLE_END, tok.value, re.M|re.I|re.S)
+                    m = re.match(self.lexer.t_TABLE_END, tok.value, re.M|re.I|re.S)
                     self.characters(m.group(1))
                     # feed \n's back to parser
                     txt = self.lexer.lexdata[self.lexer.lexpos:]
@@ -904,7 +880,7 @@ class WikklyParser(object):
                     self.beginTable()
                     self.in_table = 1
 
-                m = re.match(wikkly_lexer.t_TABLEROW_CAPTION, tok.value, re.M|re.I|re.S)
+                m = re.match(self.lexer.t_TABLEROW_CAPTION, tok.value, re.M|re.I|re.S)
                 self.setTableCaption(m.group(1))
 
                 txt = self.lexer.lexdata[self.lexer.lexpos:]
@@ -985,14 +961,24 @@ class WikklyParser(object):
 
             #elif tok.type == 'HTML_HEX_ENTITY':
             #   # reparse hex part
-            #   m = re.match(wikkly_lexer.t_HTML_HEX_ENTITY, tok.value, re.M|re.I|re.S)
+            #   m = re.match(self.lexer.t_HTML_HEX_ENTITY, tok.value, re.M|re.I|re.S)
 
-            elif tok.type == 'MACRO':
+            elif tok.type in { 'MACRO', 'START_TAG_MACRO_START' }:
                 # macro has already run, insert text ...
                 #self.characters(self.no_tags(tok.value))
                 #self.characters(tok.value)
                 name, args, kw = tok.value
-                self.macro(name, args, kw)
+                try:
+                    macro_class = self.context.macro_library.get(name)
+                except UnknownMacro as exc:
+                    exc.lineno = tok.lineno
+                    raise exc
+                else:
+                    macro = macro_class(self.context)
+                    if tok.type == "MACRO":
+                        self.call_macro(macro, args, kw)
+                    elif tok.type == "START_TAG_MACRO_START":
+                        self.callStartTagMacro(macro, args, kw)
 
             elif tok.type == 'PYTHON_EMBED':
                 pass
@@ -1040,4 +1026,4 @@ class WikklyParser(object):
             # remember for next pass
             last_token = (tok.type,tok.value)
 
-wikkly_parser = WikklyParser()
+        self.endDoc()

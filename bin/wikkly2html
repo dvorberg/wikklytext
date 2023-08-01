@@ -2,7 +2,7 @@
 
 import sys, time, argparse, pathlib
 
-from wikklytext.to_html import WikklyToHTML
+from wikklytext import to_html
 
 def main():
     parser = argparse.ArgumentParser()
@@ -12,13 +12,8 @@ def main():
     parser.add_argument("infilepath", type=pathlib.Path)
     args = parser.parse_args()
 
-    wcontext = None
-    converter = WikklyToHTML(wcontext)
-
     with args.infilepath.open() as fp:
         wikkly = fp.read()
-        parse_start = time.time()
-        converter.parse(wikkly)
 
     print('<!DOCTYPE html>',
           '<html>',
@@ -27,8 +22,11 @@ def main():
           '</head>',
           '<body>',
           sep="\n", file=args.outfile)
-    print(converter.get_html(), file=args.outfile)
+    parse_start = time.time()
+    html = to_html(wikkly)
     parse_end = time.time()
+
+    print(html, file=args.outfile)
     print('</body>', '</html>', sep="\n", file=args.outfile)
 
     print("Conversion time: %.4f sec" % (parse_end-parse_start,),
