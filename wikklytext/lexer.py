@@ -2,7 +2,7 @@
 wikklytext/lexer.py: WikklyText lexer. Part of the WikklyText suite.
 
 Copyright (C) 2007,2008 Frank McIngvale
-Copyright (C) 2022 Diedrich Vorberg
+Copyright (C) 2023 Diedrich Vorberg
 
 Contact: diedrich@tux4web.de
 
@@ -343,25 +343,14 @@ class WikklyLexer(object):
         # Do NOT allow leading inner space, so things like " << " are
         # not accidentally matched.
         r"<<[a-z_]+"
-        import wikklytext.macro
 
-        # get chunk to hand off to parse_macro_call() (back-up to start of '<<')
-        txt = self.lexer.lexdata[self.lexer.lexpos-len(t.value):]
-        try:
-            macrocall, txt_remainder = wikklytext.macro.parse_macro_call(txt)
+        macro_name = t.value[2:]
+        args, kw, remainder = parse_macro_parameter_list_from(
+            self.lexer.lexdata[self.lexer.lexpos:])
+        self.lexer.input(remainder)
 
-            self.wcontext.parser.addElement(macrocall)
-            self.lexer.input('&#DeleteMe;' + txt_remainder)
-
-        except Exception as exc:
-            # restart lexer after point of error
-            # (might be '' on non-recoverable errors)
-            self.lexer.input(exc.remainder)
-            self.wcontext.parser.error(exc.message, exc.looking_at, exc.trace)
-
-        # returning no value is supposed to work, but seems unreliable
-        t.type = 'TEXT'
-        t.value = ''
+        t.type = 'MACRO'
+        t.value = macro_name, args, kw
         return t
 
     #def t_WIKIWORD_ESC(self, t):
@@ -436,3 +425,36 @@ wikkly_lexer = WikklyLexer()
 	# #	# I only modify '<' since '>' can be a colspan symbol
 	# #	return txt.replace('<','&lt;')
 	# #	#return txt
+
+macro_parameter_re = re.compile(
+    r"^\s+'''(.*?)'''|"
+    r'^\s+"""(.*?)"""|'
+    r"^\s+'(.*?)'|"
+    r'^\s+"(.*?)"|'
+    r"^\s+([^'\">\s]+)|"
+    r"^\s*(>>)", re.DOTALL)
+def parse_macro_parameter_list_from(source):
+    """
+    Return a tipplet as (args, kw, remainder,)
+    """
+    args = []
+    source = self.lexer.lexdata[self.lexer.lexpos:]
+    while True:
+        match = macro_parameter_re.search(source)
+
+        if match is None:
+            raise Exception("Syntax error in macro paramter. Source: %s" % (
+                repr(source[:30])))
+        else:
+            found = len(match.group(0))
+
+            if match.group(6): # Found ">>")
+                break
+
+            for a in ( 1, 2, 3, 4, 5, ):
+                arg = match.group(a)
+                if arg:
+                    args.append(arg)
+                    break
+
+            source = source[found:]

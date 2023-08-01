@@ -20,6 +20,9 @@ class WikklyToHTML(WikklyParser):
     def print(self, *args, **kw):
         print(*args, **kw, file=self.output)
 
+    def get_html(self):
+        return self.output.getvalue()
+
     def open(self, tag, **params):
         def fixkey(key):
             if key.endswith("_"):
@@ -37,7 +40,6 @@ class WikklyToHTML(WikklyParser):
 
         # If we’re in a <p> and we’re opening a block level element,
         # close the <p> first.
-
         if self.tag_stack and self.tag_stack[-1] == "p" \
            and tag in self.block_level_tags:
             self.close("p")
@@ -213,3 +215,6 @@ class WikklyToHTML(WikklyParser):
             self.open("p")
 
         self.print(txt, end="")
+
+    def macro(self, name, args, kw):
+        print("macro: ", name, args, kw)

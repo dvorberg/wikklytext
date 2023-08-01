@@ -3,7 +3,7 @@ wikklytext.parser.py: Base parser interface to
 wikklytext.lexer. Part of the WikklyText suite.
 
 Copyright (C) 2007,2008 Frank McIngvale
-Copyright (C) 2022 Diedrich Vorberg
+Copyright (C) 2023 Diedrich Vorberg
 
 Contact: diedrich@tux4web.de
 
@@ -211,6 +211,9 @@ class WikklyParser(object):
 
     def characters(self, txt):
         print("chars: ", repr(txt))
+
+    def macro(self, name, args, kw):
+        print("macro: ", name, args, kw)
 
     def error(self, message, looking_at=None, trace=None):
         """
@@ -536,7 +539,7 @@ class WikklyParser(object):
 
             elif tok.type == 'LINE_INDENT':
                 # get >> chars
-                m = re.match(self.t_LINE_INDENT, tok.value)
+                m = re.match(wikkly_lexer.t_LINE_INDENT, tok.value)
                 # adjust new new nesting level
                 nr = len(m.group(1))
                 while nr > in_line_indent:
@@ -749,7 +752,8 @@ class WikklyParser(object):
                 self.handleImgLink(*tok.value)
 
             elif tok.type == 'CSS_BLOCK_START':
-                m = re.match(self.t_CSS_BLOCK_START,tok.value,re.M|re.S|re.I)
+                m = re.match(wikkly_lexer.t_CSS_BLOCK_START,
+                             tok.value, re.M|re.S|re.I)
                 name = m.group(1)
                 # push on stack
                 css_stack.append(name)
@@ -951,6 +955,7 @@ class WikklyParser(object):
                 s = s[1:] # strip &
 
                 if s == '#DeleteMe':
+                    raise Exception("DeleteMe")
                     continue
 
                 # check for hex entity
@@ -982,10 +987,12 @@ class WikklyParser(object):
             #   # reparse hex part
             #   m = re.match(wikkly_lexer.t_HTML_HEX_ENTITY, tok.value, re.M|re.I|re.S)
 
-            #elif tok.type == 'MACRO':
-            #   # macro has already run, insert text ...
-            #   #self.characters(self.no_tags(tok.value))
-            #   self.characters(tok.value)
+            elif tok.type == 'MACRO':
+                # macro has already run, insert text ...
+                #self.characters(self.no_tags(tok.value))
+                #self.characters(tok.value)
+                name, args, kw = tok.value
+                self.macro(name, args, kw)
 
             elif tok.type == 'PYTHON_EMBED':
                 pass
