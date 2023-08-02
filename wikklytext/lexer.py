@@ -199,33 +199,31 @@ class WikklyLexer(object):
     t_TEXT = r"."
 
     def __init__(self):
-        self.lexer = lex(object=self,
-                         reflags=re.M|re.I|re.S,
-                         optimize=True) # optimize?
+        self.base = lex(object=self, reflags=re.M|re.I|re.S,
+                        optimize=True) # optimize?
 
     def tokenize(self, source):
         self._source = self._remainder = source
-        self.lexer.input(source.lstrip())
+        self.base.input(source.lstrip())
 
         while True:
-            token = self.lexer.token()
+            token = self.base.token()
             if not token:
                 break
             else:
                 yield token
 
-            self._remainder = self.lexer.lexdata[self.lexer.lexpos:]
+            self._remainder = self.base.lexdata[self.base.lexpos:]
 
     @property
     def location(self):
-        if not hasattr(self, "lexer"):
-            # This happens when baselexer.lex() checks the object for
-            # things, which accesses this property. *sigh*
-            return None
-
         idx = self._source.index(self._remainder)
         return Location( lineno = self._source[:idx].count("\n") + 1,
                          looking_at = self._source[idx:idx+30] )
+
+    @property
+    def remainder(self):
+        return self.base.lexdata[self.base.lexpos:]
 
     def t_error(self, t):
         #t.lexer.skip(1)
@@ -241,11 +239,11 @@ class WikklyLexer(object):
         r"^\s*[\*•]+\s*"
         # check for '***/'
         if t.value == '***' \
-           and self.lexer.lexdata[self.lexer.lexpos] == '/' \
+           and self.base.lexdata[self.base.lexpos] == '/' \
            and self.in_strip_comment:
 
             self.in_strip_comment = 0
-            self.lexer.input(self.lexer.lexdata[self.lexer.lexpos+1:])
+            self.base.input(self.base.lexdata[self.base.lexpos+1:])
 
             # work done, return an (effectively) NOP token
             t.type = 'TEXT'
@@ -326,7 +324,7 @@ class WikklyLexer(object):
 
     #def t_RAWHTML(self, t):
     #   r"<html>.+?</html>" # non-greedy, so it won't grab consecutive html tags
-    #   # self.lexer.lexmatch seems unreliable to me, since it has a lot more groups
+    #   # self.base.lexmatch seems unreliable to me, since it has a lot more groups
     #   # than I defined. so, reparse just to be safe.
     #   t.rawtext = t.value
     #   m = re.match(r"<html>(.+)</html>",t.value,re.I)
@@ -344,8 +342,8 @@ class WikklyLexer(object):
 
         macro_name = t.value[2:]
         remainder, args, kw = parse_macro_parameter_list_from(
-            self.location, self.lexer.lexdata[self.lexer.lexpos:], ">>")
-        self.lexer.input(remainder)
+            self.location, self.base.lexdata[self.base.lexpos:], ">>")
+        self.base.input(remainder)
 
         t.value = macro_name, args, kw
         return t
@@ -365,19 +363,19 @@ class WikklyLexer(object):
         if macro_name.endswith("("):
             macro_name = macro_name[:-1]
 
-            source = " " + self.lexer.lexdata[self.lexer.lexpos:]
+            source = " " + self.base.lexdata[self.base.lexpos:]
             remainder, args, kw = parse_macro_parameter_list_from(
                 self.location, source, "):")
-            self.lexer.input(remainder.lstrip())
+            self.base.input(remainder.lstrip())
         else:
-            if self.lexer.lexdata[self.lexer.lexpos] != ":":
+            if self.base.lexdata[self.base.lexpos] != ":":
                 raise SyntaxError("Missing “:” in start tag macro call.",
                                   location=self.location)
             else:
-                self.lexer.lexpos += 1
+                self.base.lexpos += 1
                 # lstrip() the lexdata
-                while self.lexer.lexdata[self.lexer.lexpos] in " \t":
-                    self.lexer.lexpos += 1
+                while self.base.lexdata[self.base.lexpos] in " \t":
+                    self.base.lexpos += 1
 
             args = ()
             kw = {}
@@ -393,7 +391,7 @@ class WikklyLexer(object):
     #   # wikiword must begin with a capital and have at least two capitals seperated by a lower or _
     #   if not re.match("~[A-Z].*[a-z_].*[A-Z]", t.value):
     #       # does not appear to be a wikiword escape - skip the "~" and continue parsing from that point
-    #       self.lexer.input(self.lexer.lexdata[self.lexer.lexpos-len(t.value)+1:])
+    #       self.base.input(self.base.lexdata[self.base.lexpos-len(t.value)+1:])
     #       # return a 'null' token
     #       #t.type = "RAWHTML"
     #       t.type = "TEXT"
@@ -438,14 +436,14 @@ class WikklyLexer(object):
 	# 	#if txt[-1] != '\n':
 	# 	#	txt += '\n'
 
-	# 	self.lexer.input(txt)
+	# 	self.base.input(txt)
 
 	# def test(self, txt):
 	# 	self.prepare_input(txt)
 	# 	self.previous = []
 
 	# 	while 1:
-	# 		tok = self.lexer.token()
+	# 		tok = self.base.token()
 	# 		if not tok:
 	# 			break
 

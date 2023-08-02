@@ -786,11 +786,16 @@ def lex(module=None, object=None, debug=False, optimize=False,
 
     # Get the module dictionary used for the parser
     if module:
-        _items = [(k, getattr(module, k)) for k in dir(module)]
+        _items = {}
+        for k in dir(module):
+            try:
+                _items[k] = getattr(module, k)
+            except:
+                pass
+
         ldict = dict(_items)
-        # If no __file__ attribute is available, try to obtain it from the __module__ instead
-        if '__file__' not in ldict:
-            ldict['__file__'] = sys.modules[ldict['__module__']].__file__
+        # If no __file__ attribute is available, try to obtain it
+        # from the __module__ instead
     else:
         ldict = get_caller_module_dict(2)
 

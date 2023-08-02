@@ -20,7 +20,7 @@ def macromethod(method):
     parameters = parameters[1:] # skip “self”
 
     def call_it(macro, args, kw):
-        from .parser import Context
+        from .compiler import Context
 
         def convert_maybe(value, param):
             """
@@ -81,7 +81,7 @@ class Macro(object):
     def __init__(self, context):
         self.context = context
 
-    def html(self, *args, **kw):
+    def html(self):
         return None
 
     def tsearch(self, *args, **kw):
@@ -93,10 +93,7 @@ class InlineMacro(Macro):
     The HTML returned may be used within a <p> tag.
     """
     @macromethod
-    def html(self, *args, **kw):
-        contents = args[-1]
-        args = args[:-1]
-
+    def html(self, contents, *args, **kw):
         params = self.span_params(args, kw)
         params = [ f'{key}="{html.escape(value)}"'
                    for (key, value) in params.items() ]

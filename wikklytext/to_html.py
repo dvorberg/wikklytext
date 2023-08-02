@@ -1,37 +1,38 @@
 import re, html
 from io import StringIO
 
-from .parser import Context, WikklyParser
+from .compiler import Context, WikklyCompiler
 from .macros import BlockLevelMacro
 from .exceptions import WikklyError, RestrictionError
 
 def to_html(wikkly, context:Context=None):
-    converter = WikklyToHTML(context)
-    converter.parse(wikkly)
-    return converter.get_html()
+    compiler = HTMLCompiler(context)
+    return compiler.compile(wikkly)
 
 def to_inline_html(wikkly, context:Context=None):
-    converter = WikklyToInlineHTML(context)
-    converter.parse(wikkly)
-    return converter.get_html()
+    compiler = InlineHTMLCompiler(context)
+    return compiler.compile(wikkly)
 
 
-class WikklyToHTML(WikklyParser):
+class HTMLCompiler(WikklyCompiler):
     block_level_tags = { "div", "p", "ol", "ul", "li", "blockquote", "code",
                          "table", "tbody", "thead", "tr", "td",
                          "dl", "dt", "dd",
                          "h1", "h2", "h3", "h4", "h5", "h6", }
 
     # Tags that like to stand on a line by themselves.
-    loner_tags = { "ol", "ul", "code", "table", "tbody", "thead", "tr",
-                   "dl", }
+    loner_tags = { "ol", "ul", "code", "table", "tbody", "thead", "tr", "dl",}
 
     paragraph_break_re = re.compile("\n\n+")
 
     def __init__(self, context=None):
         super().__init__(context)
+
+    def compile(self, source):
         self.output = StringIO()
         self.tag_stack = []
+        super().compile(source)
+        return self.output.getvalue()
 
     def print(self, *args, **kw):
         print(*args, **kw, file=self.output)
@@ -261,7 +262,7 @@ class WikklyToHTML(WikklyParser):
         self.close("span")
 
 
-class WikklyToInlineHTML(WikklyToHTML):
+class InlineHTMLCompiler(HTMLCompiler):
     def beginDoc(self):
         # Do no create the top-level "p".
         pass
