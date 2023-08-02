@@ -1,4 +1,4 @@
-import inspect, functools
+import inspect, functools, html
 from .exceptions import UnknownMacro
 
 empty = inspect.Parameter.empty
@@ -14,15 +14,14 @@ def macromethod(method):
     class MyMacro:
         def html(self, letter, length, filename=None, color='default')
     """
-
-    from .parser import Context
-
     parameters_by_name = inspect.signature(method).parameters
     parameters = list(parameters_by_name.values())
 
     parameters = parameters[1:] # skip “self”
 
     def call_it(macro, args, kw):
+        from .parser import Context
+
         def convert_maybe(value, param):
             """
             Provided a value from lexer.parse_macro_parameter_list_from()
@@ -36,7 +35,7 @@ def macromethod(method):
                 # with a parser.Context class?
                 sig = inspect.signature(param.annotation)
                 for pp in sig.parameters.values():
-                    if isinstance(pp.annotation, Context):
+                    if issubclass(pp.annotation, Context):
                         kw[pp.name] = macro.context
                         break
 
@@ -93,7 +92,21 @@ class InlineMacro(Macro):
     """
     The HTML returned may be used within a <p> tag.
     """
-    pass
+    @macromethod
+    def html(self, *args, **kw):
+        contents = args[-1]
+        args = args[:-1]
+
+        params = self.span_params(args, kw)
+        params = [ f'{key}="{html.escape(value)}"'
+                   for (key, value) in params.items() ]
+        params =" ".join(params)
+
+        return f'<span {params}>{contents}</span>'
+
+    @macromethod
+    def span_params(self, *args, **kw):
+        raise NotImplementedError()
 
 class BlockLevelMacro(Macro):
     """
@@ -123,7 +136,7 @@ class MacroLibrary(dict):
 
     def register_module(self, module):
         for item in module.values():
-            if issubclass(item, Macro):
+            if type(item) == type and issubclass(item, Macro):
                 self.register(item)
 
     def get(self, name):

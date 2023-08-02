@@ -19,9 +19,9 @@ GNU General Public License for more details.
 """
 
 import re
-from .exceptions import WikklyError, UnknownMacro
-from .lexer import WikklyLexer
-from .macros import MacroLibrary
+from .exceptions import WikklyError, ParseError, UnknownMacro
+from .lexer import WikklyLexer, whitespace_re
+from .macros import BlockLevelMacro, MacroLibrary
 
 class Context(object):
     def __init__(self, macro_library:MacroLibrary=None):
@@ -44,6 +44,10 @@ class WikklyParser(object):
             self.context = Context()
         else:
             self.context = context
+
+    @property
+    def location(self):
+        return self.lexer.location
 
     def beginDoc(self):
         print("beginDoc")
@@ -305,8 +309,10 @@ class WikklyParser(object):
         #in_imglink = 0
         self.in_strip_ccomment = 0 # inside /*** ... ***/ block
         in_html_comment = 0 # inside <!--- ... ---> block
-        # since CSS blocks can nest, this is a list of currently open blocks, by CSS name
+        # since CSS blocks can nest, this is a list of currently open
+        # blocks, by CSS name
         css_stack = []
+        start_tag_macro_stack = []
         # allow <html> blocks to nest
         #self.in_html_block = 0
         #self.in_code = 0
@@ -318,6 +324,8 @@ class WikklyParser(object):
         self.beginDoc()
 
         for tok in self.lexer.tokenize(source):
+            # print(tok)
+
             # check for EOF or over time limit
             if tok is None:
                 # close any open lists
@@ -515,9 +523,6 @@ class WikklyParser(object):
                     self.beginSubscript()
                     in_subscript = 1
 
-            elif tok.type == "START_TAG_MACRO_END":
-                self.endStartTagMacro()
-
             elif tok.type == 'BLOCKQUOTE':
                 if in_block_indent:
                     self.endBlockquote()
@@ -551,6 +556,10 @@ class WikklyParser(object):
                 if not in_deflist:
                     self.beginDefinitionList()
                     in_deflist = 1
+
+                if in_defterm:
+                    self.endDefinitionTerm()
+                    in_defterm = False
 
                 self.beginDefinitionDef()
                 in_defdef = 1
@@ -638,7 +647,8 @@ class WikklyParser(object):
 
                 else:
                     # cannot reach ... if my logic is correct :-)
-                    raise WikklyError("** INTERNAL ERROR in N_LISTITEM **")
+                    raise WikklyError("** INTERNAL ERROR in N_LISTITEM **",
+                                      location=self.location)
 
             elif tok.type == 'U_LISTITEM':
                 # (see comments in N_LISTITEM)
@@ -703,7 +713,8 @@ class WikklyParser(object):
 
                 else:
                     # cannot reach ... if my logic is correct :-)
-                    raise WikklyError("** INTERNAL ERROR in N_LISTITEM **")
+                    raise WikklyError("** INTERNAL ERROR in N_LISTITEM **",
+                                      location=self.location)
 
             elif tok.type == 'HEADING':
                 # inside a table, this is a regular char
@@ -728,22 +739,34 @@ class WikklyParser(object):
                 self.handleImgLink(*tok.value)
 
             elif tok.type == 'CSS_BLOCK_START':
-                m = re.match(self.lexer.t_CSS_BLOCK_START,
-                             tok.value, re.M|re.S|re.I)
-                name = m.group(1)
+                name = tok.match.groupdict()["css_block_class"]
                 # push on stack
                 css_stack.append(name)
+
+                try:
+                    macro_class = self.context.macro_library.get(name)
+                except UnknownMacro as exc:
+                    exc.location = self.location
+                    raise exc
+                else:
+                    macro = macro_class(self.context)
+                    if isinstance(macro, BlockLevelMacro):
+                        raise ParseError("CSS block syntax not allowed for "
+                                         "block level macros.",
+                                         location=self.location)
+                    self.callStartTagMacro(macro, args, kw)
+
                 # inform parser
-                self.beginCSSBlock(name)
+                # self.beginCSSBlock(name)
 
             elif tok.type == 'CSS_BLOCK_END':
-                if len(css_stack):
+                if css_stack:
                     # pop name and inform parser
                     name = css_stack.pop()
-                    self.endCSSBlock()
+                    self.endStartTagMacro()
                 else:
-                    # regular chars outside of a CSS block
-                    self.characters(tok.value)
+                    raise ParseError("Unexpected end of “{{{”-style CSS block.",
+                                     location=self.location)
 
             elif tok.type == 'C_COMMENT_START':
                 #print "******** C_COMMENT_START"
@@ -847,28 +870,33 @@ class WikklyParser(object):
             elif tok.type == 'TABLEROW_END':
                 if not self.in_table:
                     # split | portion from "\n" portion
-                    m = re.match(self.lexer.t_TABLEROW_END, tok.value, re.M|re.I|re.S)
+                    m = re.match(self.lexer.t_TABLEROW_END,
+                                 tok.value, re.M|re.I|re.S)
                     self.characters(m.group(1))
                     # feed \n back to parser
                     txt = self.lexer.lexdata[self.lexer.lexpos:]
                     self.lexer.input('\n' + txt)
                 else:
-                    self.endTableCell()
-                    self.in_tablecell = 0
+                    if self.in_tablecell:
+                        self.endTableCell()
+                        self.in_tablecell = False
                     self.endTableRow()
-                    self.in_tablerow = 0
+                    self.in_tablerow = False
 
             elif tok.type == 'TABLE_END':
                 if not self.in_table:
                     # split | portion from "\n" portion
-                    m = re.match(self.lexer.t_TABLE_END, tok.value, re.M|re.I|re.S)
+                    m = re.match(self.lexer.t_TABLE_END, tok.value,
+                                 re.M|re.I|re.S)
                     self.characters(m.group(1))
                     # feed \n's back to parser
-                    txt = self.lexer.lexdata[self.lexer.lexpos:]
-                    self.lexer.input(m.group(2) + txt)
+                    txt = self.lexer.lexer.lexdata[self.lexer.lexer.lexpos:]
+                    self.lexer.lexer.input(m.group(2) + txt)
                 else:
-                    self.endTableCell()
-                    self.in_tablecell = 0
+                    if self.in_tablecell:
+                        self.endTableCell()
+                        self.in_tablecell = 0
+
                     self.endTableRow()
                     self.in_tablerow = 0
                     self.endTable()
@@ -880,7 +908,8 @@ class WikklyParser(object):
                     self.beginTable()
                     self.in_table = 1
 
-                m = re.match(self.lexer.t_TABLEROW_CAPTION, tok.value, re.M|re.I|re.S)
+                m = re.match(self.lexer.t_TABLEROW_CAPTION,
+                             tok.value, re.M|re.I|re.S)
                 self.setTableCaption(m.group(1))
 
                 txt = self.lexer.lexdata[self.lexer.lexpos:]
@@ -892,18 +921,18 @@ class WikklyParser(object):
 
             elif tok.type == 'PIPECHAR':
                 if self.in_table:
-                    self.endTableCell()
+                    if self.in_tablecell:
+                        self.endTableCell()
+                        self.in_tablecell = False
 
                     # Start next cell UNLESS this is the end of the buffer.
                     # Prevents having a false empty cell at the end of the
                     # table if the row ends in EOF
-                    txt = self.lexer.lexdata[self.lexer.lexpos:]
+                    txt = self.lexer.lexer.lexdata[self.lexer.lexer.lexpos:]
                     match = whitespace_re.match(txt)
-                    if match is not None:
+                    if match is None:
                         self.beginTableCell()
-                    else:
-                        self.in_tablecell = 0
-
+                        self.in_tablecell = True
                 else:
                     self.characters(tok.value)
 
@@ -961,7 +990,8 @@ class WikklyParser(object):
 
             #elif tok.type == 'HTML_HEX_ENTITY':
             #   # reparse hex part
-            #   m = re.match(self.lexer.t_HTML_HEX_ENTITY, tok.value, re.M|re.I|re.S)
+            #   m = re.match(self.lexer.t_HTML_HEX_ENTITY,
+            #    tok.value, re.M|re.I|re.S)
 
             elif tok.type in { 'MACRO', 'START_TAG_MACRO_START' }:
                 # macro has already run, insert text ...
@@ -971,14 +1001,38 @@ class WikklyParser(object):
                 try:
                     macro_class = self.context.macro_library.get(name)
                 except UnknownMacro as exc:
-                    exc.lineno = tok.lineno
+                    exc.location = self.location
                     raise exc
                 else:
                     macro = macro_class(self.context)
+                    block_level = isinstance(macro, BlockLevelMacro)
+                    last_type, last_value = last_token
                     if tok.type == "MACRO":
+                        if block_level and \
+                           not ( last_type == "EOLS" and \
+                                 last_value.count("\n") >= 2):
+                            raise ParseError("Block level macros must have "
+                                             "a paragraph of their own with "
+                                             "leading and trailing double "
+                                             "newlines with no extra "
+                                             "whitespace.",
+                                             location=self.location)
                         self.call_macro(macro, args, kw)
                     elif tok.type == "START_TAG_MACRO_START":
+                        if block_level:
+                            raise ParseError("At-at syntax not allowed for "
+                                             "block level macros.",
+                                             location=self.location)
                         self.callStartTagMacro(macro, args, kw)
+                        start_tag_macro_stack.append(name)
+
+            elif tok.type == "START_TAG_MACRO_END":
+                if start_tag_macro_stack:
+                    self.endStartTagMacro()
+                    start_tag_macro_stack.pop()
+                else:
+                    ParseError("Unexpected end of “@@”-style start tag macro.")
+
 
             elif tok.type == 'PYTHON_EMBED':
                 pass
@@ -1015,13 +1069,13 @@ class WikklyParser(object):
                 #if not in_table:
                 self.EOLs(tok.value)
 
-                if in_defterm:
-                    self.endDefinitionTerm()
-                    in_defterm = 0
-
                 if in_defdef:
                     self.endDefinitionDef()
                     in_defdef = 0
+
+                if in_defterm:
+                    self.endDefinitionTerm()
+                    in_defterm = 0
 
             # remember for next pass
             last_token = (tok.type,tok.value)

@@ -44,8 +44,8 @@ GNU General Public License for more details.
 #   ^***/$ : End C-comment
 #   ^<!---$ : Begin HTML comment (markers removed, inner text processed)
 #   ^--->$ : End HTML comment
-#   {{class{  : CSS block begin
-#   }}}   : CSS block end
+#   {{class{  : old: “CSS block begin” now: “inline macro call without params”
+#   }}}   : old: “CSS block end”, new: see above.
 #   ----  : Separator line
 #   ^\s*| : Begins table row (no leading text allowed per TiddlyWiki)
 #   EOLS  : One or more newlines, possibly with intermixed spaces
@@ -65,7 +65,8 @@ GNU General Public License for more details.
 
 import sys, time, re
 
-from .exceptions import SyntaxError
+from .exceptions import SyntaxError, Location
+#from ply.lex import lex
 from .baselexer import lex
 
 whitespace_re = re.compile(r"\s+")
@@ -167,7 +168,7 @@ class WikklyLexer(object):
     # code block to reside inside a CSS block, but not vice versa. Since code
     # blocks are read as raw text, no special check is needed for this since a
     # CSS block won't be recognized in a code block.
-    t_CSS_BLOCK_START = r"\{\{\s*([a-z_-][a-z0-9_-]+)\s*\{"
+    t_CSS_BLOCK_START = r"\{\{\s*(?P<css_block_class>[a-z_-][a-z0-9_-]+)\s*\{"
     t_CSS_BLOCK_END = r"\}\}\}"
     t_CODE_BLOCK = r"\{\{\{(.*?)\}\}\}"
     t_CODE_BLOCK_CSS = r'^\/\*{{{\*\/(\n.*?\n)\/\*}}}\*\/'
@@ -203,7 +204,8 @@ class WikklyLexer(object):
                          optimize=True) # optimize?
 
     def tokenize(self, source):
-        self.lexer.input(source)
+        self._source = self._remainder = source
+        self.lexer.input(source.lstrip())
 
         while True:
             token = self.lexer.token()
@@ -211,6 +213,19 @@ class WikklyLexer(object):
                 break
             else:
                 yield token
+
+            self._remainder = self.lexer.lexdata[self.lexer.lexpos:]
+
+    @property
+    def location(self):
+        if not hasattr(self, "lexer"):
+            # This happens when baselexer.lex() checks the object for
+            # things, which accesses this property. *sigh*
+            return None
+
+        idx = self._source.index(self._remainder)
+        return Location( lineno = self._source[:idx].count("\n") + 1,
+                         looking_at = self._source[idx:idx+30] )
 
     def t_error(self, t):
         #t.lexer.skip(1)
@@ -329,7 +344,7 @@ class WikklyLexer(object):
 
         macro_name = t.value[2:]
         remainder, args, kw = parse_macro_parameter_list_from(
-            t.lineno, self.lexer.lexdata[self.lexer.lexpos:], ">>")
+            self.location, self.lexer.lexdata[self.lexer.lexpos:], ">>")
         self.lexer.input(remainder)
 
         t.value = macro_name, args, kw
@@ -350,15 +365,19 @@ class WikklyLexer(object):
         if macro_name.endswith("("):
             macro_name = macro_name[:-1]
 
+            source = " " + self.lexer.lexdata[self.lexer.lexpos:]
             remainder, args, kw = parse_macro_parameter_list_from(
-                t.lineno, " " + self.lexer.lexdata[self.lexer.lexpos:], "):")
-            self.lexer.input(remainder)
+                self.location, source, "):")
+            self.lexer.input(remainder.lstrip())
         else:
             if self.lexer.lexdata[self.lexer.lexpos] != ":":
                 raise SyntaxError("Missing “:” in start tag macro call.",
-                                  lineno=t.lineno)
+                                  location=self.location)
             else:
                 self.lexer.lexpos += 1
+                # lstrip() the lexdata
+                while self.lexer.lexdata[self.lexer.lexpos] in " \t":
+                    self.lexer.lexpos += 1
 
             args = ()
             kw = {}
@@ -367,6 +386,7 @@ class WikklyLexer(object):
         return t
 
     t_START_TAG_MACRO_END = r"@@"
+
 
     #def t_WIKIWORD_ESC(self, t):
     #   r"~[a-z][a-z0-9_]+"
@@ -450,7 +470,7 @@ macro_parameter_re = re.compile(r"""
       ) |                # … OR …
     ^\s*(>>|\):)         # the end of the macro/@@id(): construct.
     """, re.DOTALL | re.VERBOSE)
-def parse_macro_parameter_list_from(lineno, source, end_marker):
+def parse_macro_parameter_list_from(location, source, end_marker):
     """
     Return a tipplet as (args, kw, remainder,)
     """
@@ -461,7 +481,7 @@ def parse_macro_parameter_list_from(lineno, source, end_marker):
 
         if match is None:
             raise SyntaxError("Syntax error in macro paramter",
-                              lineno, looking_at=source)
+                              location=location)
         else:
             found = len(match.group(0))
             keyword, a, b, c, d, e, end = match.groups()
@@ -470,7 +490,7 @@ def parse_macro_parameter_list_from(lineno, source, end_marker):
                 if end != end_marker:
                     raise SyntaxError(f"Syntax error, can’t parse “{end}” in "
                                       f"macro parameter list.",
-                                      lineno, looking_at=source)
+                                      location=location)
                 source = source[len(end):]
                 break
 
@@ -480,7 +500,7 @@ def parse_macro_parameter_list_from(lineno, source, end_marker):
                 if kw:
                     raise SyntaxError("Syntax error: positional argument "
                                       "follows named argument.",
-                                      lineno, looking_at=source)
+                                      location=location)
                 args.append(arg)
             else:
                 kw[keyword] = arg

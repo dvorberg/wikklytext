@@ -3,6 +3,7 @@ from io import StringIO
 
 from .parser import Context, WikklyParser
 from .macros import BlockLevelMacro
+from .exceptions import WikklyError, RestrictionError
 
 def to_html(wikkly, context:Context=None):
     converter = WikklyToHTML(context)
@@ -21,6 +22,10 @@ class WikklyToHTML(WikklyParser):
                          "dl", "dt", "dd",
                          "h1", "h2", "h3", "h4", "h5", "h6", }
 
+    # Tags that like to stand on a line by themselves.
+    loner_tags = { "ol", "ul", "code", "table", "tbody", "thead", "tr",
+                   "dl", }
+
     paragraph_break_re = re.compile("\n\n+")
 
     def __init__(self, context=None):
@@ -29,7 +34,6 @@ class WikklyToHTML(WikklyParser):
         self.tag_stack = []
 
     def print(self, *args, **kw):
-        print("--", repr(args), repr(kw))
         print(*args, **kw, file=self.output)
 
     def get_html(self):
@@ -56,7 +60,12 @@ class WikklyToHTML(WikklyParser):
            and tag in self.block_level_tags:
             self.close("p")
 
-        self.print(f"<{tag}{params}>", end="")
+        if tag in self.loner_tags:
+            end = "\n"
+        else:
+            end = ""
+
+        self.print(f"<{tag}{params}>", end=end)
 
         self.tag_stack.append(tag)
 
@@ -68,14 +77,21 @@ class WikklyToHTML(WikklyParser):
 
         self.print(f"</{tag}>", end=end)
 
-        assert self.tag_stack.pop() == tag, ValueError
+        if not self.tag_stack or self.tag_stack[-1] != tag:
+            raise WikklyError(f"Internal error. HTML nesting failed. "
+                              f"Can’t close “{tag}”. "
+                              f"Tag stack: {repr(self.tag_stack)}.",
+                              location=self.location)
+        else:
+            self.tag_stack.pop()
 
     def close_all(self):
         while self.tag_stack:
             self.close(self.tag_stack[-1])
 
     def beginDoc(self):
-        self.open("p")
+        pass
+        #self.open("p")
 
     def endDoc(self):
         self.close_all()
@@ -160,7 +176,7 @@ class WikklyToHTML(WikklyParser):
         print("endCodeInline")
 
     def beginTable(self):
-        self.open("table", class_="wikkly-table")
+        self.open("table", class_="table wikkly-table")
 
     def endTable(self):
         self.close("table")
@@ -210,9 +226,7 @@ class WikklyToHTML(WikklyParser):
         self.print("<hr />", end="")
 
     def EOLs(self, txt):
-        print("EOLs!!", repr(txt))
         # We ignore \n
-        # print("**", repr(txt))
         if self.paragraph_break_re.match(txt) is not None:
             if self.tag_stack and self.tag_stack[-1] == "p":
                 self.close("p")
@@ -221,10 +235,17 @@ class WikklyToHTML(WikklyParser):
         self.print("<br />", end="")
 
     def characters(self, txt):
+        if not self.tag_stack:
+            self.open("p")
+
         self.print(txt, end="")
 
     def call_macro(self, macro, args, kw):
-        result = macro.html(args, kw)
+        try:
+            result = macro.html(args, kw)
+        except WikklyError as exc:
+            exc.location = self.location
+            raise exc
 
         if isinstance(macro, BlockLevelMacro):
             self.close_all()
@@ -250,8 +271,12 @@ class WikklyToInlineHTML(WikklyToHTML):
         # there is no need to close it.
         pass
 
+    def characters(self, txt):
+        self.print(txt, end="")
+
     def open(self, tag, **params):
         if tag in self.block_level_tags:
             raise RestrictionError("You may only use inline markup "
-                                   "in this context.")
+                                   "in this context.",
+                                   location=self.location)
         super().open(tag, **params)

@@ -62,10 +62,10 @@ macro_library = MacroLibrary(NamedLanguageMacro,
                              German, English, Bild, TestMacro)
 
 def main():
-    #with open("call_macro.wikkly") as fp:
-    #    wikkly = fp.read()
+    with open("call_macro.wikkly") as fp:
+        wikkly = fp.read()
 
-    wikkly = """\
+    wikkly2 = """\
 
 
 Hallo Welt!
