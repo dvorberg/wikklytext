@@ -78,9 +78,48 @@ class WikklyParser(object):
         # allow <html> blocks to nest
         #in_html_block = 0
         #in_code = 0
+
         in_table = 0
         in_tablerow = 0
-        in_tablecell = 0
+
+        self.in_tablecell = False
+        table_cell_source_re = re.compile(
+            r"^(?P<clasdecl>\((?P<classes>[-\w ]+)\):\s*)?"
+            r"(?P<lead_spc>\s*)"
+            r"(?P<excl>!?)\s*[^\|\n]*?\s*\|")
+        def beginTableCell():
+            if self.in_tablecell:
+                compiler.endTableCell()
+
+            match = table_cell_source_re.match(compiler.parser.lexer.remainder)
+            if match is None:
+                raise ParseError("Missing closing “|” for table cell.",
+                                 location=self.location)
+            else:
+                groups = match.groupdict()
+                compiler.parser.lexer.base.lexpos += len(groups["lead_spc"])
+
+                if groups["excl"] == "!":
+                    header = True
+                    compiler.parser.lexer.base.lexpos += 1
+                else:
+                    header = False
+
+                classes = groups["classes"]
+                if classes is None:
+                    classes = set()
+                else:
+                    compiler.parser.lexer.base.lexpos += len(groups["clasdecl"])
+                    classes = set(whitespace_re.split(classes))
+
+                compiler.beginTableCell( header, classes )
+                self.in_tablecell = True
+
+        def endTableCell():
+            if self.in_tablecell:
+                compiler.endTableCell()
+                self.in_tablecell = False
+
         last_token = (None,None)  # type,value
 
         compiler.beginDoc()
@@ -101,8 +140,7 @@ class WikklyParser(object):
                         compiler.endUList()
 
                 # close any open tables
-                if in_tablecell:
-                    compiler.endTableCell()
+                endTableCell()
                 if in_tablerow:
                     compiler.endTableRow()
                 if in_table:
@@ -191,19 +229,17 @@ class WikklyParser(object):
 
             # if just saw TABLEROW_END or TABLEROW_CAPTION and next token not
             # TABLEROW_CAPTION or TABLEROW_START, then end table
-            if in_table and last_token[0] in ['TABLEROW_END',
-                                                   'TABLEROW_CAPTION'] and \
-                tok.type not in ['TABLEROW_CAPTION', 'TABLEROW_START']:
-                    if in_tablecell:
-                        compiler.endTableCell()
-                        in_tablecell = 0
+            if in_table \
+               and last_token[0] in ['TABLEROW_END', 'TABLEROW_CAPTION'] \
+               and tok.type not in ['TABLEROW_CAPTION', 'TABLEROW_START']:
+               endTableCell()
 
-                    if in_tablerow:
-                        compiler.endTableRow()
-                        in_tablerow = 0
+               if in_tablerow:
+                   compiler.endTableRow()
+                   in_tablerow = 0
 
-                    compiler.endTable()
-                    in_table = 0
+               compiler.endTable()
+               in_table = 0
 
             # if I just ended a line, and am inside a listitem,
             # then check next token.
@@ -625,9 +661,8 @@ class WikklyParser(object):
 
                 compiler.beginTableRow()
                 in_tablerow = 1
-                compiler.beginTableCell()
-                in_tablecell = 1
-                #in_tablerow = 1
+
+                beginTableCell()
 
             elif tok.type == 'TABLEROW_END':
                 if not in_table:
@@ -639,9 +674,7 @@ class WikklyParser(object):
                     txt = compiler.parser.lexer.remainder
                     compiler.parser.lexer.base.input('\n' + txt)
                 else:
-                    if in_tablecell:
-                        compiler.endTableCell()
-                        in_tablecell = False
+                    endTableCell()
                     compiler.endTableRow()
                     in_tablerow = False
 
@@ -655,9 +688,7 @@ class WikklyParser(object):
                     txt = compiler.parser.lexer.remainder
                     compiler.parser.lexer.base.input(m.group(2) + txt)
                 else:
-                    if in_tablecell:
-                        compiler.endTableCell()
-                        in_tablecell = 0
+                    endTableCell()
 
                     compiler.endTableRow()
                     in_tablerow = 0
@@ -670,9 +701,16 @@ class WikklyParser(object):
                     compiler.beginTable()
                     in_table = 1
 
-                m = re.match(compiler.lexer.t_TABLEROW_CAPTION,
-                             tok.value, re.M|re.I|re.S)
-                compiler.setTableCaption(m.group(1))
+                groups = tok.match.groupdict()
+
+                classes = groups["tab_cap_cls"]
+                if classes is not None:
+                    classes = set(whitespace_re.split(classes))
+                else:
+                    classes = set()
+
+                compiler.setTableCaption( caption = groups["tab_cap"],
+                                          classes = classes)
 
                 txt = compiler.parser.lexer.remainder
 
@@ -683,17 +721,7 @@ class WikklyParser(object):
 
             elif tok.type == 'PIPECHAR':
                 if in_table:
-                    if in_tablecell:
-                        compiler.endTableCell()
-                        in_tablecell = False
-
-                    # Start next cell UNLESS this is the end of the buffer.
-                    # Prevents having a false empty cell at the end of the
-                    # table if the row ends in EOF
-                    match = whitespace_re.match(compiler.parser.lexer.remainder)
-                    if match is None:
-                        compiler.beginTableCell()
-                        in_tablecell = True
+                    beginTableCell()
                 else:
                     compiler.characters(tok.value)
 

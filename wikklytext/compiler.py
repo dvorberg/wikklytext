@@ -139,8 +139,8 @@ class WikklyCompiler(object):
     def endTable(self):
         print("endTable")
 
-    def setTableCaption(self, txt):
-        print("TableCaption: ",txt)
+    def setTableCaption(self, caption:str, classes:set):
+        print(f"TableCaption: “{caption}” with classes: {classes}")
 
     def beginTableRow(self):
         print("beginTableRow")
@@ -148,7 +148,7 @@ class WikklyCompiler(object):
     def endTableRow(self):
         print("endTableRow")
 
-    def beginTableCell(self):
+    def beginTableCell(self, header:bool, classes:set):
         print("beginTableCell")
 
     def endTableCell(self):
@@ -189,12 +189,6 @@ class WikklyCompiler(object):
 
     def endNoWiki(self):
         print("endNoWiki")
-
-    def beginPyCode(self):
-        print("beginPyCode")
-
-    def endPyCode(self):
-        print("endPyCode")
 
     # standalone tokens
     def separator(self):

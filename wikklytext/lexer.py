@@ -55,7 +55,6 @@ GNU General Public License for more details.
 #   \s--\s : &mdash;
 #   /% .. %/ : Comment
 #   ~Name : WikiWord escape
-#  <?py .. ?> : EXTENSION - Embedded Python code.
 #  ^.$ : Nothing
 #  &#DeleteMe; : EXTENSION - Deleted in lexer
 #  &#NNN;  : Converted to plain text char
@@ -142,12 +141,41 @@ class WikklyLexer(object):
     t_HTML_COMMENT_START = r'^<!---\n'
     t_HTML_COMMENT_END = r'^--->\n'
     t_SEPARATOR = r"^\s*---[-]+\s*"
+
+    # TABLES
+    #
+    # A table cell may be marked as a header (<th>-element) with an
+    # exclemation point as the first character of its contents like so:
+    #
+    # | Phonebook              |c
+    # |! Name      |! Phone    |
+    # | Bugs Bunny | +49 12345 |
+    #
+    # Note the “c” for “caption” as the last character of the first line.
+    #
+    # A table cel lmay carry (CSS-) class information after the “|” like so
+    #
+    # |! Name                        |! Phone     |
+    # |(table-danger): Elmer J. Fudd | +1 876 432 |
+    #
+    # Headers may also carry a class. It must go before the “!” as in:
+    #
+    # |(table-success): ! Green heading | …
+    #
     t_TABLEROW_START = r"^\s*\|"
     t_TABLEROW_END = r"(\|\s*)\n" # normal end of table row
     t_TABLE_END = r"(\|\s*)(\n[\t ]*\n)" # blank line after table row =
                                          #   table end.
-    # caption is literal text in TiddlyWiki, no inner wiki markup recognized
-    t_TABLEROW_CAPTION = r"^\s*\|([^\n]*)\|c\s*?\n"
+    #
+    # The table caption may carry (CSS-) class information like so:
+    #
+    #  |(table-dark): I am the caption |c
+    #
+    # The class is meant for the <table> element. An empty caption
+    # will be ignored but not its class.
+    t_TABLEROW_CAPTION = (r"^\s*\|(\((?P<tab_cap_cls>[-\w ]+)\):\s*)?"
+                          r"(?P<tab_cap>[^\n]*)\|c\s*?\n")
+
     t_BOLD = r"''"
     t_ITALIC = r"//"
     t_STRIKETHROUGH = r"--"
