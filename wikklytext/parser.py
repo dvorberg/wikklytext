@@ -21,7 +21,8 @@ GNU General Public License for more details.
 import re
 
 from .exceptions import WikklyError, ParseError, UnknownMacro
-from .lexer import WikklyLexer, whitespace_re, parse_macro_parameter_list_from
+from .lexer import (WikklyLexer, whitespace_re, starts_with_parbreak,
+                    parse_macro_parameter_list_from)
 from .base import MacroLibrary
 
 paragraph_break_re = re.compile("\n\n+")
@@ -124,11 +125,9 @@ class WikklyParser(object):
                 macro = None
             else:
                 if macro_end == "(":
-                    source = compiler.parser.lexer.base.lexdata[
-                        compiler.parser.lexer.base.lexpos:]
                     remainder, args, kw = parse_macro_parameter_list_from(
-                        compiler.location, source, "):")
-                    compiler.parser.lexer.base.input(remainder)
+                        compiler.location, lexer.remainder, "):")
+                    lexer.remainder = remainder
 
                 macro_class = compiler.context.macro_library.get(
                     macro_name, compiler.location)
@@ -148,7 +147,7 @@ class WikklyParser(object):
             if self.in_tablecell:
                 compiler.endTableCell()
 
-            match = table_cell_source_re.match(compiler.parser.lexer.remainder)
+            match = table_cell_source_re.match(self.lexer.remainder)
             if match is None:
                 raise ParseError("Missing closing “|” for table cell.",
                                  location=compiler.location)
@@ -159,7 +158,7 @@ class WikklyParser(object):
                 header = True
 
                 # Advance the lexer to point right after the “!”.
-                compiler.parser.lexer.base.lexpos += 1
+                self.lexer.lexpos += 1
             else:
                 header = False
 
@@ -167,8 +166,7 @@ class WikklyParser(object):
                                             groups["macroend"])
             if groups["macroname"] is not None \
                and groups["macroend"] == ":":
-                compiler.parser.lexer.base.lexpos += len(
-                    groups["macroname"]) + 1
+                self.lexpos += len(groups["macroname"]) + 1
 
             compiler.beginTableCell( header, macro, args, kw )
             self.in_tablecell = True
@@ -184,7 +182,7 @@ class WikklyParser(object):
         compiler.beginDoc()
 
         for tok in self.lexer.tokenize(source):
-            #print(tok)
+            # print(tok)
 
             # check for EOF or over time limit
             if tok is None:
@@ -592,7 +590,7 @@ class WikklyParser(object):
                                      location=compiler.location)
 
             elif tok.type == 'C_COMMENT_START':
-                #print "******** C_COMMENT_START"
+                #print("******** C_COMMENT_START")
                 if in_strip_ccomment:
                     # already in C-comment, treat as normal chars
                     compiler.characters(tok.value)
@@ -600,13 +598,14 @@ class WikklyParser(object):
                     # begin C-comment (strip comment markers)
                     in_strip_ccomment = 1
 
-            #elif tok.type == 'C_COMMENT_END':
-            #   print "************* C_COMMENT_END"
-            #   if not in_strip_comment:
-            #       # not in C-comment, treat as normal chars
-            #       compiler.characters(tok.value)
-            #   else:
-            #       in_strip_comment = 0
+            # elif tok.type == 'C_COMMENT_END':
+            ## HANDLED ELSEWHERE
+             #   print "************* C_COMMENT_END"
+             #  if not in_strip_comment:
+             #      # not in C-comment, treat as normal chars
+             #      compiler.characters(tok.value)
+             #  else:
+             #      in_strip_comment = 0
 
             elif tok.type == 'HTML_COMMENT_START':
                 #print "******** C_COMMENT_START"
@@ -696,8 +695,10 @@ class WikklyParser(object):
                                  tok.value, re.M|re.I|re.S)
                     compiler.characters(m.group(1))
                     # feed \n back to parser
-                    txt = compiler.parser.lexer.remainder
-                    compiler.parser.lexer.base.input('\n' + txt)
+
+                    # Does this even word? Should this not talk back
+                    # the remainder to the last \n
+                    self.lexer.remainder = "\n" + self.lexer.remainder
                 else:
                     endTableCell()
                     compiler.endTableRow()
@@ -710,8 +711,7 @@ class WikklyParser(object):
                                  re.M|re.I|re.S)
                     compiler.characters(m.group(1))
                     # feed \n's back to parser
-                    txt = compiler.parser.lexer.remainder
-                    compiler.parser.lexer.base.input(m.group(2) + txt)
+                    self.lexer.remainder = m.group(2) + self.lexer.remainder
                 else:
                     endTableCell()
 
@@ -765,17 +765,21 @@ class WikklyParser(object):
 
                 macro = macro_class(compiler.context)
                 last_type, last_value = last_token
-                remainder = compiler.parser.lexer.remainder
+                remainder = self.lexer.remainder
                 if tok.type == "MACRO":
+                    # print("on_root_level()", repr(on_root_level()))
                     if on_root_level():
-                        if remainder.startswith("\n\n") or remainder == "" \
-                           or remainder == "\n":
+                        if (starts_with_parbreak(remainder) \
+                            or remainder.lstrip() == "") \
+                            and macro.block_html is not None:
                             what = "block"
                         else:
                             assure_paragraph()
                             what = "inline"
                     else:
                         what = "inline"
+
+                    # print("what =", repr(what), macro)
                     compiler.call_macro(what, macro, args, kw)
                 elif tok.type == "START_TAG_MACRO_START":
                     assure_paragraph()
@@ -816,7 +820,7 @@ class WikklyParser(object):
 
                 if in_heading:
                     compiler.endHeading()
-                    in_heading = 0
+                    in_heading = False
 
                 #if in_tablerow:
                 #   compiler.endTableRow()
