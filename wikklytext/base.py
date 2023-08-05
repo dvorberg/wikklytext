@@ -66,9 +66,9 @@ def call_macro_method(method, args, kw, location=None):
             except WikklyError as exc:
                 if exc.location:
                     exc.location.lineno += location.lineno - 1
-                raise exc
-            #ErrorInMacroCall(f"Error in wikkly for {param.name}.",
-            #                           location=location) from exc
+                raise ErrorInMacroCall(f"Error in wikkly for param "
+                                       f"{param.name}.",
+                                       location=location) from exc
         else:
             # These will be provided as strings by
             # parse_macro_pa_list_from()
@@ -123,9 +123,9 @@ class Macro(object):
     def tag_params(self, *args, **kw):
         raise UnsuitableMacro(f"{self} does not implement tag_params().")
 
-    def block_html(self, *args, **kw):
-        raise UnsuitableMacro(f"{self} is not suitable for block-level "
-                              "usage (only inline markup.")
+    #def block_html(self, *args, **kw):
+        # Implement me if needed.
+    block_html = None
 
     def inline_html(self, *args, **kw):
         raise UnsuitableMacro(f"{self} macro is not suitable for inline "
