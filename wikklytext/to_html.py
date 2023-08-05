@@ -343,7 +343,7 @@ class HTMLCompiler(WikklyCompiler):
 
     # standalone tokens
     def separator(self):
-        self.print("<hr />", end="")
+        self.print("<hr />")
 
     def linebreak(self):
         self.print("<br />", end="")
