@@ -1,12 +1,5 @@
-from .macros import MacroLibrary
+from .base import Context, Macro, MacroLibrary
 from .parser import WikklyParser
-
-class Context(object):
-    def __init__(self, macro_library:MacroLibrary=None):
-        if macro_library is None:
-            self.macro_library = MacroLibrary()
-        else:
-            self.macro_library = macro_library
 
 class WikklyCompiler(object):
     def __init__(self, context:Context=None):
@@ -15,7 +8,7 @@ class WikklyCompiler(object):
         else:
             self.context = context
 
-        self.parser = WikklyParser(self.context)
+        self.parser = WikklyParser()
 
     def compile(self, source):
         self.parser.parse(source, self)
@@ -29,6 +22,12 @@ class WikklyCompiler(object):
 
     def endDoc(self):
         print("endDoc")
+
+    def beginParagraph(self):
+        print("beginParagraph")
+
+    def endParagraph(self):
+        print("endParagraph")
 
     def beginBold(self):
         print("beginBold")
@@ -102,11 +101,11 @@ class WikklyCompiler(object):
     def endHeading(self):
         print("endHeading")
 
-    def beginBlockIndent(self):
-        print("beginBlockIndent")
+    def beginBlockquote(self, macro_name, args, kw):
+        print("beginBlockquote")
 
-    def endBlockIndent(self):
-        print("endBlockIndent")
+    def endBlockquote(self):
+        print("endBlockquote")
 
     def beginLineIndent(self):
         print("beginLineIndent")
@@ -114,8 +113,8 @@ class WikklyCompiler(object):
     def endLineIndent(self):
         print("endLineIndent")
 
-    def handleLink(self, A, B=None):
-        print("handleLink A=%s, B=%s" % (A,B))
+    def handleLink(self, target, text=None):
+        print("handleLink target=%s, text=%s" % (target, text))
 
     def handleImgLink(self, title, filename, url):
         print("handleImgLink title=%s, filename=%s, url=%s" % (
@@ -139,8 +138,11 @@ class WikklyCompiler(object):
     def endTable(self):
         print("endTable")
 
-    def setTableCaption(self, caption:str, classes:set):
-        print(f"TableCaption: “{caption}” with classes: {classes}")
+    def setTableCaption(self, caption:str, macro, args, kw):
+        print(f"TableCaption: "
+              f"“{caption}” "
+              f"with macro: {macro} "
+              f"args={args} kw={kw}")
 
     def beginTableRow(self):
         print("beginTableRow")
@@ -148,7 +150,7 @@ class WikklyCompiler(object):
     def endTableRow(self):
         print("endTableRow")
 
-    def beginTableCell(self, header:bool, classes:set):
+    def beginTableCell(self, header:bool, macro, args, kw):
         print("beginTableCell")
 
     def endTableCell(self):
@@ -172,11 +174,11 @@ class WikklyCompiler(object):
     def endDefinitionDef(self):
         print("endDefinitionDef")
 
-    def beginCSSBlock(self, classname):
-        print("beginCSSBlock(%s)" % classname)
+    def beginInlineBlock(self, classname):
+        print("beginInlineBlock(%s)" % classname)
 
-    def endCSSBlock(self):
-        print("endCSSBlock")
+    def endInlineBlock(self):
+        print("endInlineBlock")
 
     def beginRawHTML(self):
         print("beginRawHTML")
@@ -194,8 +196,8 @@ class WikklyCompiler(object):
     def separator(self):
         print("separator")
 
-    def EOLs(self, txt):
-        print("EOLS (#): ",len(txt))
+    def close_paragraph(self):
+        print("close_paragraph")
 
     def linebreak(self):
         print("linebreak")
@@ -203,11 +205,8 @@ class WikklyCompiler(object):
     def characters(self, txt):
         print("chars: ", repr(txt))
 
-    def call_macro(self, macro, args, kw):
-        print("macro: ", repr(macro), args, kw)
-
-    def callStartTagMacro(self, macro, args, kw):
-        print("callStartTagMacro: ", repr(macro), args, kw)
+    def call_macro(self, what, macro, args, kw):
+        print("macro: ", repr(what), repr(macro), args, kw)
 
     def endStartTagMacro(self):
         print("end start tag macro")

@@ -19,10 +19,12 @@ GNU General Public License for more details.
 """
 
 import re
-from .exceptions import WikklyError, ParseError, UnknownMacro
-from .lexer import WikklyLexer, whitespace_re
-from .macros import BlockLevelMacro, MacroLibrary
 
+from .exceptions import WikklyError, ParseError, UnknownMacro
+from .lexer import WikklyLexer, whitespace_re, parse_macro_parameter_list_from
+from .base import MacroLibrary
+
+paragraph_break_re = re.compile("\n\n+")
 class WikklyParser(object):
     """
     Base class for content parser showing the required API.
@@ -30,13 +32,11 @@ class WikklyParser(object):
     You can also instantiate this by itself to show a trace of the
     tokens from the lexer.
     """
-    def __init__(self, macro_library:MacroLibrary):
-        self.macro_library = macro_library
+    def __init__(self):
+        pass
 
     @property
     def location(self):
-        if not hasattr(self, "lexer"):
-            raise ValueError("location only available when calling parse().")
         return self.lexer.location
 
     def parse(self, source, compiler):
@@ -50,43 +50,100 @@ class WikklyParser(object):
         # into self if they are needed above
         self.lexer = WikklyLexer()
 
-        in_bold = 0
-        in_italic = 0
-        in_strikethrough = 0
-        in_underline = 0
-        in_superscript = 0
-        in_subscript = 0
-        in_highlight = 0
-        in_block_indent = 0
-        in_line_indent = 0 # if > 0 this is the nesting level
+        self.in_bold = 0
+        self.in_italic = 0
+        self.in_strikethrough = 0
+        self.in_underline = 0
+        self.in_superscript = 0
+        self.in_subscript = 0
+        self.in_blockquote = 0
         # the top of stack is the _currently_ opened listitem + level
         # e.g. for <ul>, item "###" is ('U',3), for <ol>, item '##' is ('N',2)
         list_stack = [('X',0)] # no currently opened list
-        #in_Nlistitem = 0
-        #in_Ulistitem = 0
         in_heading = 0
-        in_deflist = 0 # tiddlywiki does not let DL/DT/DD nest apparently, so don't worry about it
+        self.in_deflist = 0 # tiddlywiki does not let DL/DT/DD nest apparently, so don't worry about it
         in_defterm = 0 # in <DT>?
         in_defdef = 0  # in <DD>?
-        #in_imglink = 0
         in_strip_ccomment = 0 # inside /*** ... ***/ block
         in_html_comment = 0 # inside <!--- ... ---> block
         # since CSS blocks can nest, this is a list of currently open
         # blocks, by CSS name
-        css_stack = []
+        self.inline_block_stack = []
         start_tag_macro_stack = []
         # allow <html> blocks to nest
-        #in_html_block = 0
-        #in_code = 0
 
         in_table = 0
         in_tablerow = 0
 
-        self.in_tablecell = False
+        def on_root_level():
+            return (not self.in_paragraph
+                    and not in_heading
+                    and not self.in_deflist
+                    and not in_table
+                    and len(list_stack) == 1)
+
+        self.in_paragraph = False
+        def assure_paragraph():
+            if on_root_level():
+                compiler.beginParagraph()
+                self.in_paragraph = True
+
+        def end_current_block():
+            for flag, construct in [
+                    (self.in_bold, "'' ... ''"),
+                    (self.in_italic, "// ... //"),
+                    (self.in_strikethrough, "-- ... --"),
+                    (self.in_underline, "__ .. .__"),
+                    (self.in_superscript, "^^ ... ^^"),
+                    (self.in_subscript, "~~ ... ~~"),
+                    (self.inline_block_stack, "{{…{ ... }}}"),
+            ]:
+                if flag:
+                    raise ParseError(f"Input ended in {construct}.",
+                                     location=self.location)
+
+            if self.in_deflist:
+                compiler.endDefinitionList()
+                self.in_deflist = False
+
+            if self.in_paragraph:
+                compiler.endParagraph()
+                self.in_paragraph = False
+
+        def get_macro_for(macro_name, macro_end):
+            """
+            Parse macro calls in Wikkly constructs that allow for a
+            syntax as
+
+                macro_name(params):
+            """
+            args = []
+            kw = {}
+
+            if macro_name is None:
+                macro = None
+            else:
+                if macro_end == "(":
+                    source = compiler.parser.lexer.base.lexdata[
+                        compiler.parser.lexer.base.lexpos:]
+                    remainder, args, kw = parse_macro_parameter_list_from(
+                        compiler.location, source, "):")
+                    compiler.parser.lexer.base.input(remainder)
+
+                macro_class = compiler.context.macro_library.get(
+                    macro_name, compiler.location)
+                macro = macro_class(compiler.context)
+
+            return (macro, args, kw)
+
         table_cell_source_re = re.compile(
-            r"^(?P<clasdecl>\((?P<classes>[-\w ]+)\):\s*)?"
-            r"(?P<lead_spc>\s*)"
-            r"(?P<excl>!?)\s*[^\|\n]*?\s*\|")
+            r"^(?P<excl>!?)" # Exclamation point or not.
+            r"(?:" # Non-capturing group: Optionsl macro call start.
+            r"(?P<macroname>[^\d\W][\w]*)" # Macro name
+            r"(?P<macroend>[\(:])"         # opening of macro params or “:”
+            r")?"  # close non-capturing group of optional macro start
+            r".*?\|") # The end of the cell must be there in any case.
+        self.in_tablecell = False
         def beginTableCell():
             if self.in_tablecell:
                 compiler.endTableCell()
@@ -94,26 +151,28 @@ class WikklyParser(object):
             match = table_cell_source_re.match(compiler.parser.lexer.remainder)
             if match is None:
                 raise ParseError("Missing closing “|” for table cell.",
-                                 location=self.location)
+                                 location=compiler.location)
+
+            groups = match.groupdict()
+
+            if groups["excl"] == "!":
+                header = True
+
+                # Advance the lexer to point right after the “!”.
+                compiler.parser.lexer.base.lexpos += 1
             else:
-                groups = match.groupdict()
-                compiler.parser.lexer.base.lexpos += len(groups["lead_spc"])
+                header = False
 
-                if groups["excl"] == "!":
-                    header = True
-                    compiler.parser.lexer.base.lexpos += 1
-                else:
-                    header = False
+            macro, args, kw = get_macro_for(groups["macroname"],
+                                            groups["macroend"])
+            if groups["macroname"] is not None \
+               and groups["macroend"] == ":":
+                compiler.parser.lexer.base.lexpos += len(
+                    groups["macroname"]) + 1
 
-                classes = groups["classes"]
-                if classes is None:
-                    classes = set()
-                else:
-                    compiler.parser.lexer.base.lexpos += len(groups["clasdecl"])
-                    classes = set(whitespace_re.split(classes))
+            compiler.beginTableCell( header, macro, args, kw )
+            self.in_tablecell = True
 
-                compiler.beginTableCell( header, classes )
-                self.in_tablecell = True
 
         def endTableCell():
             if self.in_tablecell:
@@ -125,7 +184,7 @@ class WikklyParser(object):
         compiler.beginDoc()
 
         for tok in self.lexer.tokenize(source):
-            # print(tok)
+            #print(tok)
 
             # check for EOF or over time limit
             if tok is None:
@@ -146,47 +205,18 @@ class WikklyParser(object):
                 if in_table:
                     compiler.endTable()
 
-                # close any opened line-indents
-                while in_line_indent:
-                    compiler.endLineIndent()
-                    in_line_indent -= 1
-
                 # close any open definition list
                 if in_defterm:
                     compiler.endDefinitionTerm()
+                    in_defterm = False
 
                 if in_defdef:
                     compiler.endDefinitionDef()
+                    in_defdef = False
 
-                if in_deflist:
+                if self.in_deflist:
                     compiler.endDefinitionList()
-
-                # watch out for ending inside of a structured item
-                for v, s in [
-                    (in_bold, "'' ... ''"),
-                    (in_italic, "// ... //"),
-                    (in_strikethrough, "-- ... --"),
-                    (in_underline, "__ .. .__"),
-                    (in_superscript, "^^ ... ^^"),
-                    (in_subscript, "~~ ... ~~"),
-                    (in_highlight, "@@ ... @@"),
-                    (in_block_indent, "block-indent (<<<)"),
-                    #(in_imglink, "[img[ ... ]]"),
-                    #(in_html_block, "<html> ... </html>"),
-                    #(in_code, "{{{ ... }}}")]:
-                    ]:
-                        if v:
-                            raise ParseError("Input ended inside %s" % s,
-                                             location=compiler.location)
-
-            # while in blockquote, hand parser raw chars
-            #if in_blockquote and tok.type != 'BLOCKQUOTE':
-            #   if hasattr(tok,'rawtext'):
-            #       compiler.characters(tok.rawtext)
-            #   else:
-            #       compiler.characters(tok.value)
-            #
-            #   continue
+                    self.in_deflist = False
 
             # while in code, hand parser raw chars
             #if in_code and tok.type != 'CODE_END':
@@ -221,25 +251,29 @@ class WikklyParser(object):
 
             # if just ended a line, and inside a definition list,
             # and NOT starting a new definition item, end list
-            if last_token[0] == 'EOLS' and in_deflist:
+            if last_token[0] == 'EOLS' and self.in_deflist:
                 if tok.type not in['D_TERM','D_DEFINITION'] \
                    or len(last_token[1]) > 1:
-                    compiler.endDefinitionList()
-                    in_deflist = 0
+                    if in_defdef:
+                        compiler.endDefinitionDef()
+                        in_defdef = False
 
-            # if just saw TABLEROW_END or TABLEROW_CAPTION and next token not
-            # TABLEROW_CAPTION or TABLEROW_START, then end table
+                    compiler.endDefinitionList()
+                    self.in_deflist = False
+
+            # if just saw TABLEROW_END or TABLE_CAPTION and next token not
+            # TABLE_CAPTION or TABLEROW_START, then end table
             if in_table \
-               and last_token[0] in ['TABLEROW_END', 'TABLEROW_CAPTION'] \
-               and tok.type not in ['TABLEROW_CAPTION', 'TABLEROW_START']:
+               and last_token[0] in ['TABLEROW_END', 'TABLE_CAPTION'] \
+               and tok.type not in ['TABLE_CAPTION', 'TABLEROW_START']:
                endTableCell()
 
                if in_tablerow:
                    compiler.endTableRow()
-                   in_tablerow = 0
+                   in_tablerow = False
 
                compiler.endTable()
-               in_table = 0
+               in_table = False
 
             # if I just ended a line, and am inside a listitem,
             # then check next token.
@@ -263,106 +297,109 @@ class WikklyParser(object):
                             compiler.endUList()
 
             if tok.type in { 'WORD', 'TEXT' }:
-                #compiler.characters(compiler.no_tags(tok.value))
+                assure_paragraph()
                 compiler.characters(tok.value)
 
-            #elif tok.type == 'RAWTEXT':
-            # internally generated type that tells me not to escape text
-            #   compiler.characters(tok.value)
-
-            #elif tok.type == 'HTML_START':
-            #   in_html_block += 1
-
             elif tok.type == 'BOLD':
-                if in_bold:
+                assure_paragraph()
+                if self.in_bold:
                     compiler.endBold()
-                    in_bold = 0
+                    self.in_bold = 0
                 else:
                     compiler.beginBold()
-                    in_bold = 1
+                    self.in_bold = 1
 
             elif tok.type == 'ITALIC':
-                if in_italic:
+                assure_paragraph()
+                if self.in_italic:
                     compiler.endItalic()
-                    in_italic = 0
+                    self.in_italic = 0
                 else:
                     compiler.beginItalic()
-                    in_italic = 1
+                    self.in_italic = 1
 
             elif tok.type == 'STRIKETHROUGH':
-                if in_strikethrough:
+                assure_paragraph()
+                if self.in_strikethrough:
                     compiler.endStrikethrough()
-                    in_strikethrough = 0
+                    self.in_strikethrough = 0
                 else:
                     compiler.beginStrikethrough()
-                    in_strikethrough = 1
+                    self.in_strikethrough = 1
 
             elif tok.type == 'UNDERLINE':
-                if in_underline:
+                assure_paragraph()
+                if self.in_underline:
                     compiler.endUnderline()
-                    in_underline = 0
+                    self.in_underline = 0
                 else:
                     compiler.beginUnderline()
-                    in_underline = 1
+                    self.in_underline = 1
 
             elif tok.type == 'SUPERSCRIPT':
-                if in_superscript:
+                assure_paragraph()
+                if self.in_superscript:
                     compiler.endSuperscript()
-                    in_superscript = 0
+                    self.in_superscript = 0
                 else:
                     compiler.beginSuperscript()
-                    in_superscript = 1
+                    self.in_superscript = 1
 
             elif tok.type == 'SUBSCRIPT':
-                if in_subscript:
+                assure_paragraph()
+                if self.in_subscript:
                     compiler.endSubscript()
-                    in_subscript = 0
+                    self.in_subscript = 0
                 else:
                     compiler.beginSubscript()
-                    in_subscript = 1
+                    self.in_subscript = 1
 
-            elif tok.type == 'BLOCKQUOTE':
-                if in_block_indent:
-                    compiler.endBlockquote()
-                    in_block_indent = 0
-                else:
-                    compiler.beginBlockquote()
-                    in_block_indent = 1
+            elif tok.type == 'BLOCKQUOTE_START':
+                if self.in_blockquote:
+                    raise ParseError("Blockquotes can’t nest.",
+                                     location=compiler.location)
 
-            elif tok.type == 'HTML_ESCAPE':
-                m = re.match(compiler.t_HTML_ESCAPE, tok.value, re.M|re.I|re.S)
-                compiler.beginRawHTML()
-                compiler.characters(m.group(1))
-                compiler.endRawHTML()
+                groups = tok.match.groupdict()
+                macro, args, kw = get_macro_for(
+                    groups["blockquote_macro_start"],
+                    groups["blockquote_macro_end"])
+                compiler.beginBlockquote(macro, args, kw)
+                self.in_blockquote = True
 
-            elif tok.type == 'WIKI_ESCAPE':
-                m = re.match(compiler.t_WIKI_ESCAPE, tok.value, re.M|re.I|re.S)
-                # <nowiki> gets its own Text type to prevent camelwording
-                compiler.beginNoWiki()
-                compiler.characters(m.group(1))
-                compiler.endNoWiki()
+            elif tok.type == "BLOCKQUOTE_END":
+                if not self.in_blockquote:
+                    raise ParseError("Missing beginning of blockquote.",
+                                     location=compiler.location)
+                if self.in_paragraph:
+                    compiler.endParagraph()
+                    self.in_paragraph = False
+
+                compiler.endBlockquote()
+                self.in_blockquote = False
 
             elif tok.type == 'D_TERM':
-                if not in_deflist:
+                if not self.in_deflist:
                     compiler.beginDefinitionList()
-                    in_deflist = 1
+                    self.in_deflist = True
 
                 compiler.beginDefinitionTerm()
-                in_defterm = 1
+                in_defterm = True
 
             elif tok.type == 'D_DEFINITION':
-                if not in_deflist:
+                if not self.in_deflist:
                     compiler.beginDefinitionList()
-                    in_deflist = 1
+                    self.in_deflist = True
 
                 if in_defterm:
                     compiler.endDefinitionTerm()
                     in_defterm = False
 
                 compiler.beginDefinitionDef()
-                in_defdef = 1
+                in_defdef = True
 
             elif tok.type == 'N_LISTITEM':
+                end_current_block()
+
                 #print "N_LISTITEM, VALUE ",tok.value, "STACK ",list_stack
 
                 # (see file 'stack' for more detailed derivation)
@@ -449,9 +486,8 @@ class WikklyParser(object):
                                       location=compiler.location)
 
             elif tok.type == 'U_LISTITEM':
+                end_current_block()
                 # (see comments in N_LISTITEM)
-
-                #print "U_LISTITEM, VALUE ",tok.value, "STACK ",list_stack
 
                 # case 1:
                 if list_stack[-1][0] == 'U' \
@@ -527,40 +563,29 @@ class WikklyParser(object):
                 in_heading = 1
 
             elif tok.type == 'LINK_AB':
-                compiler.handleLink(tok.value[0], tok.value[1])
+                assure_paragraph()
+                text, target = tok.value
+                compiler.handleLink(text, target)
 
             elif tok.type == 'LINK_A':
+                assure_paragraph()
                 compiler.handleLink(tok.value)
 
-            elif tok.type in ['IMGLINK_TFU', 'IMGLINK_TF',
-                              'IMGLINK_FU', 'IMGLINK_F']:
-                compiler.handleImgLink(*tok.value)
-
-            elif tok.type == 'CSS_BLOCK_START':
+            elif tok.type == 'INLINE_BLOCK_START':
+                assure_paragraph()
                 name = tok.match.groupdict()["css_block_class"]
                 # push on stack
-                css_stack.append(name)
+                self.inline_block_stack.append(name)
 
-                try:
-                    macro_class = compiler.context.macro_library.get(name)
-                except UnknownMacro as exc:
-                    exc.location = compiler.location
-                    raise exc
-                else:
-                    macro = macro_class(compiler.context)
-                    if isinstance(macro, BlockLevelMacro):
-                        raise ParseError("CSS block syntax not allowed for "
-                                         "block level macros.",
-                                         location=compiler.location)
-                    compiler.callStartTagMacro(macro, args, kw)
+                macro_class = compiler.context.macro_library.get(
+                    name, compiler.location)
+                macro = macro_class(compiler.context)
+                compiler.call_macro("openspan", macro, args=[], kw={})
 
-                # inform parser
-                # compiler.beginCSSBlock(name)
-
-            elif tok.type == 'CSS_BLOCK_END':
-                if css_stack:
+            elif tok.type == 'INLINE_BLOCK_END':
+                if self.inline_block_stack:
                     # pop name and inform parser
-                    name = css_stack.pop()
+                    name = self.inline_block_stack.pop()
                     compiler.endStartTagMacro()
                 else:
                     raise ParseError("Unexpected end of “{{{”-style CSS block.",
@@ -603,7 +628,7 @@ class WikklyParser(object):
 
             elif tok.type == 'CODE_BLOCK':
                 # regex grabs entire block since no nesting allowed
-                m = re.match(compiler.lexer.t_CODE_BLOCK,
+                m = re.match(self.lexer.t_CODE_BLOCK,
                              tok.value, re.M|re.I|re.S)
                 text = m.group(1)
 
@@ -611,7 +636,7 @@ class WikklyParser(object):
 
             elif tok.type == 'CODE_BLOCK_CSS':
                 # regex grabs entire block since no nesting allowed
-                m = re.match(compiler.lexer.t_CODE_BLOCK_CSS, tok.value,
+                m = re.match(self.lexer.t_CODE_BLOCK_CSS, tok.value,
                              re.M|re.I|re.S)
                 text = m.group(1)
 
@@ -619,7 +644,7 @@ class WikklyParser(object):
 
             elif tok.type == 'CODE_BLOCK_CPP':
                 # regex grabs entire block since no nesting allowed
-                m = re.match(compiler.lexer.t_CODE_BLOCK_CPP, tok.value,
+                m = re.match(self.lexer.t_CODE_BLOCK_CPP, tok.value,
                              re.M|re.I|re.S)
                 text = m.group(1)
 
@@ -627,7 +652,7 @@ class WikklyParser(object):
 
             elif tok.type == 'CODE_BLOCK_HTML':
                 # regex grabs entire block since no nesting allowed
-                m = re.match(compiler.lexer.t_CODE_BLOCK_HTML, tok.value,
+                m = re.match(self.lexer.t_CODE_BLOCK_HTML, tok.value,
                              re.M|re.I|re.S)
                 text = m.group(1)
 
@@ -646,9 +671,9 @@ class WikklyParser(object):
             #       compiler.endCode()
             #       in_code = 0
             #   # else, might be a CSS block ending
-            #   elif len(css_stack):
+            #   elif len(self.inline_block_stack):
             #       # pop name and inform parser
-            #       name = css_stack.pop()
+            #       name = self.inline_block_stack.pop()
             #       compiler.endCSSBlock(name)
             #   # otherwise, it's just regular text
             #   else:
@@ -657,7 +682,7 @@ class WikklyParser(object):
             elif tok.type == 'TABLEROW_START':
                 if not in_table:
                     compiler.beginTable()
-                    in_table = 1
+                    in_table = True
 
                 compiler.beginTableRow()
                 in_tablerow = 1
@@ -667,7 +692,7 @@ class WikklyParser(object):
             elif tok.type == 'TABLEROW_END':
                 if not in_table:
                     # split | portion from "\n" portion
-                    m = re.match(compiler.lexer.t_TABLEROW_END,
+                    m = re.match(self.lexer.t_TABLEROW_END,
                                  tok.value, re.M|re.I|re.S)
                     compiler.characters(m.group(1))
                     # feed \n back to parser
@@ -681,7 +706,7 @@ class WikklyParser(object):
             elif tok.type == 'TABLE_END':
                 if not in_table:
                     # split | portion from "\n" portion
-                    m = re.match(compiler.lexer.t_TABLE_END, tok.value,
+                    m = re.match(self.lexer.t_TABLE_END, tok.value,
                                  re.M|re.I|re.S)
                     compiler.characters(m.group(1))
                     # feed \n's back to parser
@@ -691,33 +716,23 @@ class WikklyParser(object):
                     endTableCell()
 
                     compiler.endTableRow()
-                    in_tablerow = 0
+                    in_tablerow = False
                     compiler.endTable()
-                    in_table = 0
+                    in_table = False
 
-            elif tok.type == 'TABLEROW_CAPTION':
-                # watch for caption as first row of table
+            elif tok.type == 'TABLE_CAPTION':
+                # Table caption starts a table.
                 if not in_table:
                     compiler.beginTable()
-                    in_table = 1
+                    in_table = True
 
                 groups = tok.match.groupdict()
 
-                classes = groups["tab_cap_cls"]
-                if classes is not None:
-                    classes = set(whitespace_re.split(classes))
-                else:
-                    classes = set()
+                macro, args, kw = get_macro_for(groups["tabcap_macroname"],
+                                                groups["tabcap_macroend"])
 
-                compiler.setTableCaption( caption = groups["tab_cap"],
-                                          classes = classes)
-
-                txt = compiler.parser.lexer.remainder
-
-                # have to check for table ending since I grabbed the \n
-                if re.match(r"[\t ]*[\n]", txt):
-                    compiler.endTable()
-                    in_table = 0
+                compiler.setTableCaption(groups["tabcap"].strip(),
+                                         macro, args, kw)
 
             elif tok.type == 'PIPECHAR':
                 if in_table:
@@ -738,82 +753,34 @@ class WikklyParser(object):
             #elif tok.type == 'DELETE_ME':
             #   pass # nothing
 
-            elif tok.type == 'XHTML_ENTITY':
-                s = tok.value
-                if s[-1] == ';': # remove ; if present
-                    addsemi = u';' # remember to add back (below), if needed
-                    s = s[:-1]
-                else:
-                    addsemi = u''
-
-                s = s[1:] # strip &
-
-                if s == '#DeleteMe':
-                    raise Exception("DeleteMe")
-                    continue
-
-                # check for hex entity
-                m = re.match(r'\#x([0-9a-h]+)', s, re.M|re.I|re.S)
-                if m:
-                    if m.group(1) in ['200b','200B']:
-                        # &#x200b; is special - pass to XML layer
-                        compiler.characters('&#x200b;')
-                    else:
-                        compiler.characters(unichr(hex2int(m.group(1))))
-
-                    continue
-
-                # check for decimal entity
-                m = re.match(r'\#([0-9]+)', s, re.M|re.I|re.S)
-                if m:
-                    compiler.characters(unichr(int(m.group(1))))
-                    continue
-
-                # see if name defined in htmlentitydefs
-                import htmlentitydefs as hed
-                if hed.name2codepoint.has_key(s):
-                    compiler.characters(unichr(hed.name2codepoint[s]))
-                else:
-                    # else, return as raw text (will be escaped in final output)
-                    compiler.characters(u'&' + s + addsemi)
-
             #elif tok.type == 'HTML_HEX_ENTITY':
             #   # reparse hex part
-            #   m = re.match(compiler.lexer.t_HTML_HEX_ENTITY,
+            #   m = re.match(self.lexer.t_HTML_HEX_ENTITY,
             #    tok.value, re.M|re.I|re.S)
 
             elif tok.type in { 'MACRO', 'START_TAG_MACRO_START' }:
-                # macro has already run, insert text ...
-                #compiler.characters(compiler.no_tags(tok.value))
-                #compiler.characters(tok.value)
                 name, args, kw = tok.value
-                try:
-                    macro_class = compiler.context.macro_library.get(name)
-                except UnknownMacro as exc:
-                    exc.location = compiler.location
-                    raise exc
-                else:
-                    macro = macro_class(compiler.context)
-                    block_level = isinstance(macro, BlockLevelMacro)
-                    last_type, last_value = last_token
-                    if tok.type == "MACRO":
-                        if block_level and \
-                           not ( last_type == "EOLS" and \
-                                 last_value.count("\n") >= 2):
-                            raise ParseError("Block level macros must have "
-                                             "a paragraph of their own with "
-                                             "leading and trailing double "
-                                             "newlines with no extra "
-                                             "whitespace.",
-                                             location=compiler.location)
-                        compiler.call_macro(macro, args, kw)
-                    elif tok.type == "START_TAG_MACRO_START":
-                        if block_level:
-                            raise ParseError("At-at syntax not allowed for "
-                                             "block level macros.",
-                                             location=compiler.location)
-                        compiler.callStartTagMacro(macro, args, kw)
-                        start_tag_macro_stack.append(name)
+                macro_class = compiler.context.macro_library.get(
+                    name, compiler.location, )
+
+                macro = macro_class(compiler.context)
+                last_type, last_value = last_token
+                remainder = compiler.parser.lexer.remainder
+                if tok.type == "MACRO":
+                    if on_root_level():
+                        if remainder.startswith("\n\n") or remainder == "" \
+                           or remainder == "\n":
+                            what = "block"
+                        else:
+                            assure_paragraph()
+                            what = "inline"
+                    else:
+                        what = "inline"
+                    compiler.call_macro(what, macro, args, kw)
+                elif tok.type == "START_TAG_MACRO_START":
+                    assure_paragraph()
+                    compiler.call_macro("openspan", macro, args, kw)
+                    start_tag_macro_stack.append(name)
 
             elif tok.type == "START_TAG_MACRO_END":
                 if start_tag_macro_stack:
@@ -855,16 +822,16 @@ class WikklyParser(object):
                 #   compiler.endTableRow()
                 #   in_tablerow = 0
 
-                #if not in_table:
-                compiler.EOLs(tok.value)
-
                 if in_defdef:
                     compiler.endDefinitionDef()
-                    in_defdef = 0
+                    in_defdef = False
 
                 if in_defterm:
                     compiler.endDefinitionTerm()
-                    in_defterm = 0
+                    in_defterm = False
+
+                if paragraph_break_re.match(tok.value) is not None:
+                    end_current_block()
 
             # remember for next pass
             last_token = (tok.type,tok.value)

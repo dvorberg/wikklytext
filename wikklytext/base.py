@@ -1,9 +1,26 @@
 import inspect, functools, html, dataclasses
-from .exceptions import UnknownLanguage, UnknownMacro
+from .exceptions import (WikklyError, ErrorInMacroCall,
+                         UnknownLanguage, UnknownMacro, UnsuitableMacro)
+
+def html_start_tag(tag, **params):
+    def fixkey(key):
+        if key.endswith("_"):
+            return key[:-1]
+        else:
+            return key
+
+    if params:
+        params = [ f'{fixkey(key)}="{html.escape(value)}"'
+                   for (key, value) in params.items() ]
+        params = " " + " ".join(params)
+    else:
+        params = ""
+
+    return f"<{tag}{params}>"
 
 ## Macros and their MacroLibrary
 empty = inspect.Parameter.empty
-def macromethod(method):
+def call_macro_method(method, args, kw, location=None):
     """
     Wrap a macro’s html() or tsearch() function in such a way that
     the arguments provided by
@@ -14,60 +31,82 @@ def macromethod(method):
 
     class MyMacro:
         def html(self, letter, length, filename=None, color='default')
+
+    If the method raises an exception that is not a WikklyError
+    it will be wrapped in a ErrorInMacroCall. In any case,
+    the “location” information will be provided, if present.
     """
     parameters_by_name = inspect.signature(method).parameters
     parameters = list(parameters_by_name.values())
 
-    parameters = parameters[1:] # skip “self”
+    def convert_maybe(value, param):
+        """
+        Provided a value from lexer.parse_macro_parameter_list_from()
+        as a string, this function will attempt to cast it to the
+        type indicated by the function parameter annotation.
+        """
+        if param.annotation is not empty:
+            kw = {}
 
-    def call_it(macro, args, kw):
-        def convert_maybe(value, param):
-            """
-            Provided a value from lexer.parse_macro_parameter_list_from()
-            as a string, this function will attempt to cast it to the
-            type indicated by the function parameter annotation.
-            """
-            if param.annotation is not empty:
-                kw = {}
+            # If the param.annotation is callable and accepts a
+            # context parameter, provide it.
+            if callable(param.annotation):
+                try:
+                    sig = inspect.signature(param.annotation)
+                except ValueError:
+                    pass
+                else:
+                    for pp in sig.parameters.values():
+                        if issubclass(pp.annotation, Context):
+                            kw[pp.name] = method.__self__.context
+                            break
 
-                # Does the annotation have a parameter that’s annotated
-                # with a parser.Context class?
-                sig = inspect.signature(param.annotation)
-                for pp in sig.parameters.values():
-                    if issubclass(pp.annotation, Context):
-                        kw[pp.name] = macro.context
-                        break
-
+            try:
                 return param.annotation(value, **kw)
-            else:
-                # These will be provided as strings by
-                # parse_macro_pa_list_from()
-                # except for `self`.
-                return value
+            except WikklyError as exc:
+                if exc.location:
+                    exc.location.lineno += location.lineno - 1
+                raise exc
+            #ErrorInMacroCall(f"Error in wikkly for {param.name}.",
+            #                           location=location) from exc
+        else:
+            # These will be provided as strings by
+            # parse_macro_pa_list_from()
+            # except for `self`.
+            return value
 
-        # These are provided as positional arguments.
-        positional = parameters[:len(args)]
-        # These came with identifier= keywords.
-        throughkw = parameters[len(args):]
+    # These are provided as positional arguments.
+    positional = parameters[:len(args)]
+    # These came with identifier= keywords.
+    throughkw = parameters[len(args):]
 
-        # Convert the positional arguments.
-        args = [ convert_maybe(arg, param)
-                 for arg, param in zip(args, positional) ]
+    # Convert the positional arguments.
+    args = [ convert_maybe(arg, param)
+             for arg, param in zip(args, positional) ]
 
-        # Convert the keyword arguments.
-        kw = dict([ (name, convert_maybe(value, parameters_by_name[name]),)
-                    for name, value in kw.items() ])
+    # Convert the keyword arguments.
+    kw = dict([ (name, convert_maybe(value, parameters_by_name[name]),)
+                for name, value in kw.items() ])
 
-        # Fill up the **kw dict to have the provided default values
-        # in it.
-        for param in throughkw:
-            if not param.name in kw and param.default is not empty:
-                kw[param.name] = param.default
+    # Fill up the **kw dict to have the provided default values
+    # in it.
+    for param in throughkw:
+        if not param.name in kw and param.default is not empty:
+            kw[param.name] = param.default
 
-        # Call the function we wrap.
-        return method(macro, *args, **kw)
+    # Call the method.
+    try:
+        if "location" in kw and not "location" in parameters_by_name:
+            del kw["location"]
 
-    return call_it
+        return method(*args, **kw)
+    except Exception as exc:
+        if not isinstance(exc, WikklyError):
+            raise ErrorInMacroCall(f"Error calling {method}",
+                                   location=location) from exc
+        else:
+            exc.location = location
+            raise exc
 
 
 class Macro(object):
@@ -81,36 +120,19 @@ class Macro(object):
     def __init__(self, context):
         self.context = context
 
-    def html(self):
-        return None
+    def tag_params(self, *args, **kw):
+        raise UnsuitableMacro(f"{self} does not implement tag_params().")
+
+    def block_html(self, *args, **kw):
+        raise UnsuitableMacro(f"{self} is not suitable for block-level "
+                              "usage (only inline markup.")
+
+    def inline_html(self, *args, **kw):
+        raise UnsuitableMacro(f"{self} macro is not suitable for inline "
+                              "usage (only block-level markup.")
 
     def tsearch(self, *args, **kw):
-        return None
-
-
-class InlineMacro(Macro):
-    """
-    The HTML returned may be used within a <p> tag.
-    """
-    @macromethod
-    def html(self, contents, *args, **kw):
-        params = self.span_params(args, kw)
-        params = [ f'{key}="{html.escape(value)}"'
-                   for (key, value) in params.items() ]
-        params =" ".join(params)
-
-        return f'<span {params}>{contents}</span>'
-
-    @macromethod
-    def span_params(self, *args, **kw):
-        raise NotImplementedError()
-
-class BlockLevelMacro(Macro):
-    """
-    The HTML returned requires the current paragraph (-like element)
-    to be closed to create valid HTML.
-    """
-    pass
+        raise NotImplemented()
 
 class MacroLibrary(dict):
     def __init__(self, *macros):
@@ -135,11 +157,12 @@ class MacroLibrary(dict):
             if type(item) == type and issubclass(item, Macro):
                 self.register(item)
 
-    def get(self, name):
+    def get(self, name, source_location):
         if name not in self:
-            raise UnknownMacro(f"Macro named “{name}” not found.")
-        else:
-            return self[name]
+            raise UnknownMacro(f"Macro named “{name}” not found.",
+                               location=source_location)
+
+        return self[name]
 
     def extend(self, other):
         for item in other.values():

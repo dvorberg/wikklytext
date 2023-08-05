@@ -86,16 +86,13 @@ class WikklyLexer(object):
         'MACRO',
         'START_TAG_MACRO_START',
         'START_TAG_MACRO_END',
-        'BLOCK_INDENT',
+        'BLOCKQUOTE_START',
+        'BLOCKQUOTE_END',
         'LINK_AB',
         'LINK_A',
-        'IMGLINK_TFU',
-        'IMGLINK_TF',
-        'IMGLINK_FU',
-        'IMGLINK_F',
         #'IMGSTART',
-        'CSS_BLOCK_START',
-        'CSS_BLOCK_END',
+        'INLINE_BLOCK_START',
+        'INLINE_BLOCK_END',
         #'CODE_START',
         #'CODE_END',
         'CODE_BLOCK',
@@ -110,7 +107,7 @@ class WikklyLexer(object):
         'TABLEROW_START',
         'TABLEROW_END',
         'TABLE_END',
-        'TABLEROW_CAPTION',
+        'TABLE_CAPTION',
         'EOLS',
         # NOTE: this never becomes a token - it turns into TEXT below
         # I'm leaving this as a comment so the length with match with
@@ -118,8 +115,6 @@ class WikklyLexer(object):
         'CATCH_URL',
         #'HTML_START',
         #'HTML_END',
-        'HTML_ESCAPE',
-        'WIKI_ESCAPE',
         'COMMENT',
         # NOTE: this never becomes a token - it turns into TEXT below
         # I'm leaving this as a comment so the length with match with
@@ -127,17 +122,15 @@ class WikklyLexer(object):
         #'WIKIWORD_ESC',
         'HTML_BREAK',
         'PIPECHAR',
-        'XHTML_ENTITY',
         'NULLDOT',
         #'DELETE_ME',
         # for internal use only - keep the lexer from matching BOL as needed
-        'WORD',
+        #'WORD',
         'TEXT',
         # internally-generated, but still has to be in this list ...
         #'RAWTEXT',
     )
 
-    t_BLOCK_INDENT = r"^<<<\s+|^>>>\s+"
     t_HTML_COMMENT_START = r'^<!---\n'
     t_HTML_COMMENT_END = r'^--->\n'
     t_SEPARATOR = r"^\s*---[-]+\s*"
@@ -173,8 +166,16 @@ class WikklyLexer(object):
     #
     # The class is meant for the <table> element. An empty caption
     # will be ignored but not its class.
-    t_TABLEROW_CAPTION = (r"^\s*\|(\((?P<tab_cap_cls>[-\w ]+)\):\s*)?"
-                          r"(?P<tab_cap>[^\n]*)\|c\s*?\n")
+    t_TABLE_CAPTION = (
+        r"^\|"
+        r"(?:" # Non-capturing group: Optionsl macro call start.
+        r"(?P<tabcap_macroname>[^\d\W][\w]*)" # Macro name
+        r"(?P<tabcap_macroend>[\(:])"         # opening of macro params or “:”
+        r")?"  # close non-capturing group of optional macro start
+        r"(?P<tabcap>.*?)\|c" # Terminating “|”
+        r"\s*\n" # The newline must be consumed by this re, or a EOLs will
+                 # cause the parser to end the table prematurely.
+    )
 
     t_BOLD = r"''"
     t_ITALIC = r"//"
@@ -196,13 +197,12 @@ class WikklyLexer(object):
     # code block to reside inside a CSS block, but not vice versa. Since code
     # blocks are read as raw text, no special check is needed for this since a
     # CSS block won't be recognized in a code block.
-    t_CSS_BLOCK_START = r"\{\{\s*(?P<css_block_class>[a-z_-][a-z0-9_-]+)\s*\{"
-    t_CSS_BLOCK_END = r"\}\}\}"
+    t_INLINE_BLOCK_START = r"\{\{\s*(?P<css_block_class>[a-z_-][a-z0-9_-]+)\s*\{"
+    t_INLINE_BLOCK_END = r"\}\}\}"
     t_CODE_BLOCK = r"\{\{\{(.*?)\}\}\}"
     t_CODE_BLOCK_CSS = r'^\/\*{{{\*\/(\n.*?\n)\/\*}}}\*\/'
     t_CODE_BLOCK_CPP = r'^\/\/{{{(\n.*?\n)\/\/}}}'
     t_CODE_BLOCK_HTML = r'^<!--{{{-->(\n.*?\n)<!--}}}-->'
-    t_XHTML_ENTITY = r"&([a-z0-9\x23]+)(;)?"
     # note optional semicolon - need to catch for XSS filter
 
     t_COMMENT = r"[\s\n]*/%.*?%/[\s\n]*"
@@ -217,8 +217,6 @@ class WikklyLexer(object):
     #t_HTML_END = r"</html>"
     # TiddlyWiki does not allow nesting, so grab all at once
 
-    t_HTML_ESCAPE = r"<html>(.*?)</html>"
-    t_WIKI_ESCAPE = r"<nowiki>(.*?)</nowiki>"
     t_PIPECHAR = r"\|"
     t_NULLDOT = r"^\s*\.\s*$"
     # extension: a lone dot causes the line to be ignored
@@ -314,41 +312,6 @@ class WikklyLexer(object):
         t.value = (m.group(1), m.group(2))
         return t
 
-    # image link forms:
-    # [img[FILENAME]]
-    def t_IMGLINK_F(self, t):
-        r"\[img\[([^\|\[\]]+?)\]\]"
-        #print "LEX MATCH IMG F",t.value
-        m = re.match(r"\[img\[([^\|\[\]]+?)\]\]", t.value, re.M|re.I|re.S)
-        t.value = (None, m.group(1), None)
-        return t
-
-    # [img[FILENAME][URL]]
-    def t_IMGLINK_FU(self, t):
-        r"\[img\[([^\|\[\]]+?)\]\[([^\|\[\]]+?)\]\]"
-        #print "LEX MATCH IMG FU",t.value
-        m = re.match(r"\[img\[([^\|\[\]]+?)\]\[([^\|\[\]]+?)\]\]",
-                     t.value, re.M|re.I|re.S)
-        t.value = (None, m.group(1), m.group(2))
-        return t
-
-    # [img[TITLE|FILENAME][URL]]
-    def t_IMGLINK_TFU(self, t):
-        r"\[img\[([^\|\[\]]+?)\|([^\|\[\]]+?)\]\[([^\|\[\]]+?)\]\]"
-        #print "LEX MATCH IMG TFU",t.value
-        m = re.match(
-                r"\[img\[([^\|\[\]]+?)\|([^\|\[\]]+?)\]\[([^\|\[\]]+?)\]\]",
-                t.value, re.M|re.I|re.S)
-        t.value = (m.group(1), m.group(2), m.group(3))
-        return t
-
-    # [img[TITLE|FILENAME]]
-    def t_IMGLINK_TF(self, t):
-        r"\[img\[([^\|\[\]]+?)\|([^\|\[\]]+?)\]\]"
-        m = re.match(r"\[img\[([^\|\[\]]+?)\|([^\|\[\]]+?)\]\]",
-                     t.value, re.M|re.I|re.S)
-        t.value = (m.group(1), m.group(2), None)
-        return t
 
     #def t_RAWHTML(self, t):
     #   r"<html>.+?</html>" # non-greedy, so it won't grab consecutive html tags
@@ -385,7 +348,11 @@ class WikklyLexer(object):
         #
         #     @@identifyer('Something'): more Wikkly@@.
         #
-        r"@@([^\d\W][\w]+)(\(?)"
+        # Leading whitespace from the text content will be removed. To prevent
+        # “word:” to be used as macro name, put a space after the opening
+        # “@@”.
+        #
+        r"@@([^\d\W][\w]*)(\(?)"
 
         macro_name = t.value[2:]
         if macro_name.endswith("("):
@@ -413,6 +380,14 @@ class WikklyLexer(object):
 
     t_START_TAG_MACRO_END = r"@@"
 
+    t_BLOCKQUOTE_START = (
+        r"^<<<"
+        r"(?:"
+        r"(?P<blockquote_macro_start>[^\d\W][\w]*)"
+        r"(?P<blockquote_macro_end>[\):])"
+        r")?"
+        r"\s+")
+    t_BLOCKQUOTE_END = r">>>\n"
 
     #def t_WIKIWORD_ESC(self, t):
     #   r"~[a-z][a-z0-9_]+"

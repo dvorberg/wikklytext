@@ -1,8 +1,8 @@
-import re, html
+import sys, re, html
 from io import StringIO
 
 from .compiler import Context, WikklyCompiler
-from .macros import BlockLevelMacro
+from .base import Macro, call_macro_method, html_start_tag
 from .exceptions import WikklyError, RestrictionError
 
 def to_html(wikkly, context:Context=None):
@@ -14,33 +14,26 @@ def to_inline_html(wikkly, context:Context=None):
     return compiler.compile(wikkly)
 
 class TableCell(object):
-    def __init__(self, header:bool, classes:set):
+    def __init__(self, header:bool, params:dict):
         self.header = header
         if header:
             self.tag = "th"
         else:
             self.tag = "td"
-        self.classes = classes
+        self.params = params
         self.output = StringIO()
 
-
-    def get_html(self):
-        if self.classes:
-            cls = f' class="{" ".join(self.classes)}"'
-        else:
-            cls = ""
-
-        start_tag = f'<{self.tag}{cls}>'
-        end_tag = f'</{self.tag}>'
-
-        return start_tag + self.output.getvalue().strip() + end_tag
+    def write_cell(self, compiler):
+        compiler.open(self.tag, **self.params)
+        compiler.print(self.output.getvalue().strip(), end="")
+        compiler.close(self.tag)
 
 class Table(object):
     def __init__(self, compiler):
         self.compiler = compiler
         self.original_output = compiler.output
-        self.caption = None
-        self.classes = {"table"}
+        self._caption = None
+        self.tag_params = {}
         self._rows = []
         self.compiler.tag_stack.append("--in-table--")
 
@@ -48,15 +41,22 @@ class Table(object):
     def current_row(self):
         return self._rows[-1]
 
-    def set_caption(self, caption:str, classes:set):
-        self.caption = caption.strip()
-        self.classes |= classes
+    @property
+    def caption(self):
+        return self._caption
+
+    @caption.setter
+    def caption(self, caption:str):
+        self._caption = caption
+
+    def set_tag_params(self, params):
+        self.tag_params = params
 
     def make_row(self):
         self._rows.append([])
 
-    def make_cell(self, header:bool, align:str="left"):
-        cell = TableCell(header, align)
+    def make_cell(self, header:bool, params:dict):
+        cell = TableCell(header, params)
         self.current_row.append(cell)
         self.compiler.output = cell.output
 
@@ -79,10 +79,11 @@ class Table(object):
             for row in rows:
                 open("tr")
                 for cell in row:
-                    print(cell.get_html())
+                    cell.write_cell(self.compiler)
                 close("tr")
 
-        open("table", class_=" ".join(self.classes))
+        open("table", **self.tag_params)
+
         if self.caption:
             print(f'<caption>{self.caption}</caption>')
 
@@ -109,37 +110,27 @@ class Table(object):
         close("table")
 
     def finalize(self):
-        assert self.compiler.tag_stack.pop() == "--in-table--", WikklyError
+        if self.compiler.tag_stack.pop() != "--in-table--":
+            raise WikklyError("Internal Error: Table nesting failed.",
+                              location=self.compiler.location)
 
+        # Restore the compiler’s output stream.
         self.compiler.output = self.original_output
 
         if self._rows:
             # This uses self.compiler.print()
-            # which, after the line above, directy
+            # which, after the line above, is directed
             # to the original output.
             self.write_table()
 
-
-def needs_paragraph(f):
-    def call_it(self, *args):
-        if not self.tag_stack:
-            self.open("p")
-
-        f(self, *args)
-
-    return call_it
-
-
 class HTMLCompiler(WikklyCompiler):
     block_level_tags = { "div", "p", "ol", "ul", "li", "blockquote", "code",
-                         "table", "tbody", "thead", "tr", "td",
+                         "table", "tbody", "thead", "tr", "td", "th",
                          "dl", "dt", "dd",
                          "h1", "h2", "h3", "h4", "h5", "h6", }
 
     # Tags that like to stand on a line by themselves.
     loner_tags = { "ol", "ul", "code", "table", "tbody", "thead", "tr", "dl",}
-
-    paragraph_break_re = re.compile("\n\n+")
 
     def __init__(self, context=None):
         super().__init__(context)
@@ -158,33 +149,17 @@ class HTMLCompiler(WikklyCompiler):
         return self.output.getvalue()
 
     def open(self, tag, **params):
-        def fixkey(key):
-            if key.endswith("_"):
-                return key[:-1]
-            else:
-                return key
-
-        if params:
-            params = [ f'{fixkey(key)}="{html.escape(value)}"'
-                       for (key, value) in params.items() ]
-            params = " " + " ".join(params)
-        else:
-            params = ""
-
-
         # If we’re in a <p> and we’re opening a block level element,
         # close the <p> first.
-        if self.tag_stack and self.tag_stack[-1] == "p" \
-           and tag in self.block_level_tags:
-            self.close("p")
-
+        #if self.tag_stack and self.tag_stack[-1] == "p" \
+        #   and tag in self.block_level_tags:
+        #    self.close("p")
         if tag in self.loner_tags:
             end = "\n"
         else:
             end = ""
 
-        self.print(f"<{tag}{params}>", end=end)
-
+        self.print(html_start_tag(tag, **params), end=end)
         self.tag_stack.append(tag)
 
     def close(self, tag):
@@ -217,47 +192,40 @@ class HTMLCompiler(WikklyCompiler):
     def endDoc(self):
         self.close_all()
 
-    @needs_paragraph
+    def beginParagraph(self): self.open("p")
+    def endParagraph(self): self.close("p")
+
     def beginBold(self): self.open("b")
     def endBold(self): self.close("b")
 
-    @needs_paragraph
     def beginItalic(self): self.open("i")
     def endItalic(self): self.close("i")
 
-    @needs_paragraph
     def beginStrikethrough(self): self.open("s")
     def endStrikethrough(self): self.close("s")
 
-    @needs_paragraph
     def beginUnderline(self): self.open("u")
     def endUnderline(self): self.close("u")
 
-    @needs_paragraph
     def beginSuperscript(self): self.open("sup")
     def endSuperscript(self): self.close("sup")
 
-    @needs_paragraph
     def beginSubscript(self): self.open("sub")
     def endSubscript(self): self.close("sub")
 
-    @needs_paragraph
     def beginHighlight(self, style=None):
         #print("beginHighlight, style=%s" % repr(style))
         self.open("span", class_="wikkly-highlight")
     def endHighlight(self): self.close("span")
 
-    @needs_paragraph
     def beginCodeInline(self):
         print("beginCodeInline")
 
     def endCodeInline(self):
         print("endCodeInline")
 
-    @needs_paragraph
     def characters(self, txt):
         self.print(txt, end="")
-
 
     def beginNList(self): self.open("ol")
     def endNList(self): self.close("ol")
@@ -291,17 +259,22 @@ class HTMLCompiler(WikklyCompiler):
         self.close(f"h{self._current_heading_level}")
         self._current_heading_level = None
 
-    def beginBlockquote(self):
-        self.open("blockquote")
+    def beginBlockquote(self, macro, args, kw):
+        if macro is not None:
+            params = call_macro_method(
+                macro.tag_params, args, kw, self.location)
+        else:
+            params = {}
+
+        self.open("blockquote", **params)
 
     def endBlockquote(self):
         self.close("blockquote")
 
-    def handleLink(self, A, B=None):
-        # print("handleLink A=%s, B=%s" % (A,B))
-        self.characters("")
-        self.print(f'<a href="{A}">{A}</a>', end="")
-        self.characters("")
+    def handleLink(self, text, target=None):
+        self.open("a", href=target or text)
+        self.print(text, end="")
+        self.close("a")
 
     def handleImgLink(self, title, filename, url):
         print("handleImgLink title=%s, filename=%s, url=%s" % (
@@ -320,8 +293,11 @@ class HTMLCompiler(WikklyCompiler):
         self._table.finalize()
         self._table = None
 
-    def setTableCaption(self, caption:str, classes:set):
-        self._table.set_caption(caption, classes)
+    def setTableCaption(self, caption:str, macro, args, kw):
+        self._table.caption = caption
+        if macro is not None:
+            self._table.tag_params = call_macro_method(
+                macro.tag_params, args, kw, self.location)
 
     def beginTableRow(self):
         self._table.make_row()
@@ -329,8 +305,13 @@ class HTMLCompiler(WikklyCompiler):
     def endTableRow(self):
         pass
 
-    def beginTableCell(self, header:bool, classes:set):
-        self._table.make_cell(header, classes)
+    def beginTableCell(self, header:bool, macro, args, kw):
+        if macro is None:
+            params = {}
+        else:
+            params = call_macro_method(macro.tag_params,
+                                       args, kw, location=self.location)
+        self._table.make_cell(header, params)
 
     def endTableCell(self):
         pass
@@ -342,11 +323,11 @@ class HTMLCompiler(WikklyCompiler):
     def beginDefinitionDef(self): self.open("dd")
     def endDefinitionDef(self): self.close("dd")
 
-    def beginCSSBlock(self, classname):
-        print("beginCSSBlock(%s)" % classname)
+    def beginInlineBlock(self, classname):
+        print("beginInlineBlock(%s)" % classname)
 
-    def endCSSBlock(self):
-        print("endCSSBlock")
+    def endInlineBlock(self):
+        print("endInlineBlock")
 
     def beginRawHTML(self):
         print("beginRawHTML")
@@ -364,44 +345,33 @@ class HTMLCompiler(WikklyCompiler):
     def separator(self):
         self.print("<hr />", end="")
 
-    def EOLs(self, txt):
-        # We ignore \n
-        if self.paragraph_break_re.match(txt) is not None:
-            if self.tag_stack and self.tag_stack[-1] == "p":
-                self.close("p")
-
     def linebreak(self):
         self.print("<br />", end="")
 
-    def call_macro(self, macro, args, kw):
-        try:
-            result = macro.html(args, kw)
-        except WikklyError as exc:
-            exc.location = self.location
-            raise exc1
-
-        if isinstance(macro, BlockLevelMacro):
+    def call_macro(self, what, macro, args, kw):
+        if what == "block":
             self.close_all()
-            self.print("\n", result)
+            self.print(call_macro_method(macro.block_html, args, kw,
+                                         location=self.location))
+        elif what == "inline":
+            self.print(call_macro_method(macro.inline_html, args, kw,
+                                         location=self.location), end="")
+        elif what == "openspan":
+            self.open("span", **call_macro_method(macro.tag_params,
+                                                  args, kw,
+                                                  location=self.location))
         else:
-            self.print(result, end="")
-
-
-    def callStartTagMacro(self, macro, args, kw):
-        self.open("span", **macro.span_params(args, kw))
+            raise ValueError(what)
 
     def endStartTagMacro(self):
         self.close("span")
 
 
 class InlineHTMLCompiler(HTMLCompiler):
-    def beginDoc(self):
-        # Do no create the top-level "p".
+    def beginParagraph(self):
         pass
 
-    def endDoc(self):
-        # Conversely to characters() not opening a top-level "p",
-        # there is no need to close it.
+    def endParagraph(self):
         pass
 
     def beginTable(self):
@@ -417,3 +387,8 @@ class InlineHTMLCompiler(HTMLCompiler):
                                    "in this context.",
                                    location=self.location)
         super().open(tag, **params)
+
+    def call_macro(self, what, macro, args, kw):
+        if what == "block":
+            what = "inline"
+        return super().call_macro(what, macro, args, kw)

@@ -52,14 +52,23 @@ class WikklyError(Exception):
 
         return ret.getvalue()
 
+class ErrorInMacroCall(WikklyError):
+    pass
+
 class SyntaxError(WikklyError):
     pass
 
 class UnknownMacro(WikklyError):
     pass
 
+class UnsuitableMacro(WikklyError):
+    pass
+
 class RestrictionError(WikklyError):
     pass
 
 class ParseError(WikklyError):
+    pass
+
+class UnknownLanguage(WikklyError):
     pass
