@@ -69,6 +69,7 @@ from .exceptions import SyntaxError, Location
 from .baselexer import lex
 
 whitespace_re = re.compile(r"\s+")
+leading_whitespace_re = re.compile(r"(\s+)")
 
 class WikklyLexer(object):
     tokens = (
@@ -133,7 +134,6 @@ class WikklyLexer(object):
 
     t_HTML_COMMENT_START = r'^<!---\n'
     t_HTML_COMMENT_END = r'^--->\n'
-    t_SEPARATOR = r"^\s*---[-]+\s*"
 
     # TABLES
     #
@@ -177,9 +177,11 @@ class WikklyLexer(object):
                  # cause the parser to end the table prematurely.
     )
 
+    t_SEPARATOR = r"^---[-]+\s*"
+
     t_BOLD = r"''"
     t_ITALIC = r"//"
-    t_STRIKETHROUGH = r"--"
+    t_STRIKETHROUGH = r"--\s*[^\-\W]+|\[^\-\W]+\s*--"
     t_UNDERLINE = r"__"
     t_SUPERSCRIPT = r"\^\^"
     t_SUBSCRIPT = r"~~"
@@ -229,7 +231,7 @@ class WikklyLexer(object):
                         optimize=True) # optimize?
 
     def tokenize(self, source):
-        self._source = self._remainder = source
+        self._source = source
         self.base.input(source.lstrip())
 
         while True:
@@ -239,17 +241,28 @@ class WikklyLexer(object):
             else:
                 yield token
 
-            self._remainder = self.base.lexdata[self.base.lexpos:]
-
     @property
     def location(self):
-        idx = self._source.index(self._remainder)
-        return Location( lineno = self._source[:idx].count("\n") + 1,
-                         looking_at = self._source[idx:idx+30] )
+        lineno = self.base.lexdata[:self.lexpos].count("\n") + 1
+        return Location( lineno = lineno,
+                         looking_at = self.remainder[:30] )
 
     @property
     def remainder(self):
         return self.base.lexdata[self.base.lexpos:]
+
+    @property
+    def lexpos(self):
+        return self.base.lexpos
+
+    @lexpos.setter
+    def lexpos(self, lexpos):
+        self.base.lexpos = lexpos
+
+    @remainder.setter
+    def remainder(self, remainder):
+        assert self.base.lexdata.endswith(remainder)
+        self.base.lexpos = len(self.base.lexdata)-len(remainder)
 
     def t_error(self, t):
         #t.lexer.skip(1)
@@ -269,7 +282,7 @@ class WikklyLexer(object):
            and self.in_strip_comment:
 
             self.in_strip_comment = 0
-            self.base.input(self.base.lexdata[self.base.lexpos+1:])
+            self.lexpos += 1
 
             # work done, return an (effectively) NOP token
             t.type = 'TEXT'
@@ -332,9 +345,8 @@ class WikklyLexer(object):
         r"<<[a-z_]+"
 
         macro_name = t.value[2:]
-        remainder, args, kw = parse_macro_parameter_list_from(
-            self.location, self.base.lexdata[self.base.lexpos:], ">>")
-        self.base.input(remainder)
+        self.remainder, args, kw = parse_macro_parameter_list_from(
+            self.location, self.remainder, ">>")
 
         t.value = macro_name, args, kw
         return t
@@ -361,7 +373,7 @@ class WikklyLexer(object):
             source = " " + self.base.lexdata[self.base.lexpos:]
             remainder, args, kw = parse_macro_parameter_list_from(
                 self.location, source, "):")
-            self.base.input(remainder.lstrip())
+            self.remainder = remainder.lstrip()
         else:
             if self.base.lexdata[self.base.lexpos] != ":":
                 raise SyntaxError("Missing “:” in start tag macro call.",
@@ -509,3 +521,8 @@ def parse_macro_parameter_list_from(location, source, end_marker):
             source = source[found:]
 
     return source, args, kw,
+
+parbreak_re = re.compile(WikklyLexer.t_EOLS.__doc__)
+def starts_with_parbreak(remainder):
+    match = parbreak_re.match(remainder)
+    return (match is not None and match.group().count("\n") >= 2)
