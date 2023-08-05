@@ -1,6 +1,7 @@
-import inspect, functools, html
-from .exceptions import UnknownMacro
+import inspect, functools, html, dataclasses
+from .exceptions import UnknownLanguage, UnknownMacro
 
+## Macros and their MacroLibrary
 empty = inspect.Parameter.empty
 def macromethod(method):
     """
@@ -20,8 +21,6 @@ def macromethod(method):
     parameters = parameters[1:] # skip “self”
 
     def call_it(macro, args, kw):
-        from .compiler import Context
-
         def convert_maybe(value, param):
             """
             Provided a value from lexer.parse_macro_parameter_list_from()
@@ -70,6 +69,7 @@ def macromethod(method):
 
     return call_it
 
+
 class Macro(object):
     """
     Base class for Wikkly Macros. The macro will be
@@ -112,7 +112,6 @@ class BlockLevelMacro(Macro):
     """
     pass
 
-
 class MacroLibrary(dict):
     def __init__(self, *macros):
         super().__init__()
@@ -145,3 +144,38 @@ class MacroLibrary(dict):
     def extend(self, other):
         for item in other.values():
             self.register(item)
+
+
+## Languages
+@dataclasses.dataclass
+class Language(object):
+    iso: str
+    tsearch_configuration: str
+
+class Languages(dict):
+    def __init__(self, *languages):
+        super().__init__()
+        for language in languages:
+            self.register(language)
+
+    def register(self, language):
+        self[language.iso] = language
+
+    def by_iso(self, iso):
+        try:
+            return self[isi]
+        except KeyError:
+            raise UnknownLanguage(f"Unknown language (ISO) code: “{iso}”")
+
+## Context
+class Context(object):
+    def __init__(self, macro_library:MacroLibrary={},
+                 languages:Languages=Languages()):
+        self.macro_library = macro_library
+        self.languages = languages
+
+    def register_language(self, language):
+        self.languages.register(language)
+
+    def language(self, iso):
+        return self.languages.by_iso(iso)
