@@ -146,7 +146,7 @@ class MacroLibrary(dict):
         Register a macro class with this library using its “name” attribute
         or its class name, if not present.
         """
-        name = macro_class.name or macro_class.__name__.lower()
+        name = macro_class.name or macro_class.__name__
         if name in self:
             raise NameError(f"A macro named {name} already exists.")
         else:
@@ -157,10 +157,10 @@ class MacroLibrary(dict):
             if type(item) == type and issubclass(item, Macro):
                 self.register(item)
 
-    def get(self, name, source_location):
+    def get(self, name, location):
         if name not in self:
             raise UnknownMacro(f"Macro named “{name}” not found.",
-                               location=source_location)
+                               location=location)
 
         return self[name]
 
@@ -168,6 +168,8 @@ class MacroLibrary(dict):
         for item in other.values():
             self.register(item)
 
+    def __repr__(self):
+        return self.__class__.__name__ + ":" + super().__repr__()
 
 ## Languages
 @dataclasses.dataclass
@@ -192,7 +194,7 @@ class Languages(dict):
 
 ## Context
 class Context(object):
-    def __init__(self, macro_library:MacroLibrary={},
+    def __init__(self, macro_library:MacroLibrary=MacroLibrary(),
                  languages:Languages=Languages()):
         self.macro_library = macro_library
         self.languages = languages
