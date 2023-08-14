@@ -21,8 +21,8 @@ GNU General Public License for more details.
 import re
 
 from .exceptions import WikklyError, ParseError, UnknownMacro
-from .lexer import (WikklyLexer, whitespace_re, starts_with_parbreak,
-                    parse_macro_parameter_list_from)
+from .tokens import parse_macro_parameter_list_from
+from .lexer import WikklyLexer, starts_with_parbreak
 from .base import MacroLibrary
 
 paragraph_break_re = re.compile("\n\n+")
@@ -184,6 +184,11 @@ class WikklyParser(object):
         for tok in self.lexer.tokenize(source):
             # print(tok)
 
+            # ply.lex.lex() puts the regex match object in
+            # lexer.lexmatch if the token has an associated
+            # function.
+            lexmatch = getattr(self.lexer.base, "lexmatch", None)
+
             # check for EOF or over time limit
             if tok is None:
                 # close any open lists
@@ -215,37 +220,6 @@ class WikklyParser(object):
                 if self.in_deflist:
                     compiler.endDefinitionList()
                     self.in_deflist = False
-
-            # while in code, hand parser raw chars
-            #if in_code and tok.type != 'CODE_END':
-            #   if hasattr(tok,'rawtext'):
-            #       compiler.characters(tok.rawtext)
-            #   else:
-            #       compiler.characters(tok.value)
-            #
-            #   continue
-
-            # while in <html>, hand parser raw chars, checking for nesting
-            #if in_html_block:
-            #   if tok.type == 'HTML_END':
-            #       in_html_block -= 1
-            #   elif tok.type == 'HTML_START':
-            #       in_html_block += 1
-            #   else:
-            #       if hasattr(tok,'rawtext'):
-            #           val = tok.rawtext
-            #       else:
-            #           val = tok.value
-            #
-            #       compiler.characters(val)
-            #
-            #   continue
-
-            # if just ended a line, and inside a table, and NOT starting a new tablerow, end table
-            #if last_token[0] == 'EOLS' and in_table:
-            #   if tok.type != 'TABLEROW_START' or len(last_token[1]) > 1:
-            #       compiler.endTable()
-            #       in_table = 0
 
             # if just ended a line, and inside a definition list,
             # and NOT starting a new definition item, end list
@@ -357,7 +331,7 @@ class WikklyParser(object):
                     raise ParseError("Blockquotes can’t nest.",
                                      location=compiler.location)
 
-                groups = tok.match.groupdict()
+                groups = lexmatch.groupdict()
                 macro, args, kw = get_macro_for(
                     groups["blockquote_macro_start"],
                     groups["blockquote_macro_end"])
@@ -571,7 +545,7 @@ class WikklyParser(object):
 
             elif tok.type == 'INLINE_BLOCK_START':
                 assure_paragraph()
-                name = tok.match.groupdict()["css_block_class"]
+                name = lexmatch.groupdict()["inlblk_macro_name"]
                 # push on stack
                 self.inline_block_stack.append(name)
 
@@ -588,24 +562,6 @@ class WikklyParser(object):
                 else:
                     raise ParseError("Unexpected end of “{{{”-style CSS block.",
                                      location=compiler.location)
-
-            elif tok.type == 'C_COMMENT_START':
-                #print("******** C_COMMENT_START")
-                if in_strip_ccomment:
-                    # already in C-comment, treat as normal chars
-                    compiler.characters(tok.value)
-                else:
-                    # begin C-comment (strip comment markers)
-                    in_strip_ccomment = 1
-
-            # elif tok.type == 'C_COMMENT_END':
-            ## HANDLED ELSEWHERE
-             #   print "************* C_COMMENT_END"
-             #  if not in_strip_comment:
-             #      # not in C-comment, treat as normal chars
-             #      compiler.characters(tok.value)
-             #  else:
-             #      in_strip_comment = 0
 
             elif tok.type == 'HTML_COMMENT_START':
                 #print "******** C_COMMENT_START"
@@ -625,37 +581,37 @@ class WikklyParser(object):
                     # strip end markers
                     in_html_comment = 0
 
-            elif tok.type == 'CODE_BLOCK':
-                # regex grabs entire block since no nesting allowed
-                m = re.match(self.lexer.t_CODE_BLOCK,
-                             tok.value, re.M|re.I|re.S)
-                text = m.group(1)
+            # elif tok.type == 'CODE_BLOCK':
+            #     # regex grabs entire block since no nesting allowed
+            #     m = re.match(self.lexer.t_CODE_BLOCK,
+            #                  tok.value, re.M|re.I|re.S)
+            #     text = m.group(1)
 
-                compiler.handle_codeblock(text)
+            #     compiler.handle_codeblock(text)
 
-            elif tok.type == 'CODE_BLOCK_CSS':
-                # regex grabs entire block since no nesting allowed
-                m = re.match(self.lexer.t_CODE_BLOCK_CSS, tok.value,
-                             re.M|re.I|re.S)
-                text = m.group(1)
+            # elif tok.type == 'CODE_BLOCK_CSS':
+            #     # regex grabs entire block since no nesting allowed
+            #     m = re.match(self.lexer.t_CODE_BLOCK_CSS, tok.value,
+            #                  re.M|re.I|re.S)
+            #     text = m.group(1)
 
-                compiler.handle_codeblock(text)
+            #     compiler.handle_codeblock(text)
 
-            elif tok.type == 'CODE_BLOCK_CPP':
-                # regex grabs entire block since no nesting allowed
-                m = re.match(self.lexer.t_CODE_BLOCK_CPP, tok.value,
-                             re.M|re.I|re.S)
-                text = m.group(1)
+            # elif tok.type == 'CODE_BLOCK_CPP':
+            #     # regex grabs entire block since no nesting allowed
+            #     m = re.match(self.lexer.t_CODE_BLOCK_CPP, tok.value,
+            #                  re.M|re.I|re.S)
+            #     text = m.group(1)
 
-                compiler.handle_codeblock(text)
+            #     compiler.handle_codeblock(text)
 
-            elif tok.type == 'CODE_BLOCK_HTML':
-                # regex grabs entire block since no nesting allowed
-                m = re.match(self.lexer.t_CODE_BLOCK_HTML, tok.value,
-                             re.M|re.I|re.S)
-                text = m.group(1)
+            # elif tok.type == 'CODE_BLOCK_HTML':
+            #     # regex grabs entire block since no nesting allowed
+            #     m = re.match(self.lexer.t_CODE_BLOCK_HTML, tok.value,
+            #                  re.M|re.I|re.S)
+            #     text = m.group(1)
 
-                compiler.handle_codeblock(text)
+            #     compiler.handle_codeblock(text)
 
 
             #elif tok.type == 'CODE_START':
@@ -726,7 +682,7 @@ class WikklyParser(object):
                     compiler.beginTable()
                     in_table = True
 
-                groups = tok.match.groupdict()
+                groups = lexmatch.groupdict()
 
                 macro, args, kw = get_macro_for(groups["tabcap_macroname"],
                                                 groups["tabcap_macroend"])
@@ -749,14 +705,6 @@ class WikklyParser(object):
 
             elif tok.type == 'NULLDOT':
                 pass # nothing
-
-            #elif tok.type == 'DELETE_ME':
-            #   pass # nothing
-
-            #elif tok.type == 'HTML_HEX_ENTITY':
-            #   # reparse hex part
-            #   m = re.match(self.lexer.t_HTML_HEX_ENTITY,
-            #    tok.value, re.M|re.I|re.S)
 
             elif tok.type in { 'MACRO', 'START_TAG_MACRO_START' }:
                 name, args, kw = tok.value
@@ -792,23 +740,6 @@ class WikklyParser(object):
                     start_tag_macro_stack.pop()
                 else:
                     ParseError("Unexpected end of “@@”-style start tag macro.")
-
-
-            elif tok.type == 'PYTHON_EMBED':
-                pass
-                # if compiler.wcontext.restricted_mode:
-                #     compiler.wcontext.compiler.error(
-                #             "Not allowed to define macros in Safe Mode",
-                #             tok.rawtext, '')
-
-                # else:
-                #     compiler.beginPyCode()
-                #     compiler.characters(tok.value)
-                #     compiler.endPyCode()
-
-            #elif tok.type == 'RAWHTML':
-            #   print "** RAWHTML **",tok.value
-            #   compiler.characters(tok.value)
 
             elif tok.type == "HTML_BREAK":
                 compiler.linebreak()
