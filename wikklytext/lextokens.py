@@ -48,7 +48,7 @@ GNU General Public License for more details.
 
 
 import re
-from .exceptions import Location, SyntaxError, LexerSetupError
+from tinymarkup.exceptions import Location, SyntaxError, LexerSetupError
 
 macro_parameter_re = re.compile(r"""
     ^\s+                 # Every param, including the first, has leading space.
