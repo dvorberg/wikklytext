@@ -5,6 +5,13 @@ class Location:
     lineno: int
     looking_at: str
 
+    @classmethod
+    def from_baselexer(cls, lexer):
+        lineno = lexer.lexdata[:lexer.lexpos].count("\n") + 1
+        remainder = lexer.lexdata[lexer.lexpos:]
+        return Location( lineno = lineno,
+                         looking_at = remainder[:40])
+
 class WikklyError(Exception):
     """
 	General-purpose exception raised when errors occur during parsing
@@ -51,6 +58,9 @@ class WikklyError(Exception):
             say(f"Traceback: {self.trace}")
 
         return ret.getvalue()
+
+class LexerSetupError(WikklyError):
+    pass
 
 class ErrorInMacroCall(WikklyError):
     pass
