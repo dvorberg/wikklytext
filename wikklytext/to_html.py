@@ -1,9 +1,12 @@
 import sys, re, html
 from io import StringIO
 
-from .compiler import Context, WikklyCompiler
-from .base import Macro, call_macro_method, html_start_tag
-from .exceptions import WikklyError, RestrictionError
+from tinymarkup.exceptions import InternalError, RestrictionError
+from tinymarkup.context import Context
+from tinymarkup.macro import Macro, call_macro_method
+from tinymarkup.utils import html_start_tag
+
+from .compiler import WikklyCompiler
 
 def to_html(wikkly, context:Context=None):
     compiler = HTMLCompiler(context)
@@ -111,8 +114,8 @@ class Table(object):
 
     def finalize(self):
         if self.compiler.tag_stack.pop() != "--in-table--":
-            raise WikklyError("Internal Error: Table nesting failed.",
-                              location=self.compiler.location)
+            raise InternalError("Internal Error: Table nesting failed.",
+                                location=self.compiler.location)
 
         # Restore the compiler’s output stream.
         self.compiler.output = self.original_output
@@ -171,10 +174,10 @@ class HTMLCompiler(WikklyCompiler):
         self.print(f"</{tag}>", end=end)
 
         if not self.tag_stack or self.tag_stack[-1] != tag:
-            raise WikklyError(f"Internal error. HTML nesting failed. "
-                              f"Can’t close “{tag}”. "
-                              f"Tag stack: {repr(self.tag_stack)}.",
-                              location=self.location)
+            raise InternalError(f"Internal error. HTML nesting failed. "
+                                f"Can’t close “{tag}”. "
+                                f"Tag stack: {repr(self.tag_stack)}.",
+                                location=self.location)
         else:
             self.tag_stack.pop()
 
