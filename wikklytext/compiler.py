@@ -1,4 +1,6 @@
-from .base import Context, Macro, MacroLibrary
+from tinymarkup.context import Context
+from tinymarkup.macro import Macro, MacroLibrary
+
 from .parser import WikklyParser
 
 class WikklyCompiler(object):
@@ -211,20 +213,20 @@ class WikklyCompiler(object):
     def endStartTagMacro(self):
         print("end start tag macro")
 
-    def handle_codeblock(self, text):
-        # multi or single line?
-        if '\n' in text:
-            # strip leading/trailing newlines
-            while len(text) and text[0] == '\n':
-                text = text[1:]
+    # def handle_codeblock(self, text):
+    #     # multi or single line?
+    #     if '\n' in text:
+    #         # strip leading/trailing newlines
+    #         while len(text) and text[0] == '\n':
+    #             text = text[1:]
 
-            while len(text) and text[-1] == '\n':
-                text = text[:-1]
+    #         while len(text) and text[-1] == '\n':
+    #             text = text[:-1]
 
-            self.beginCodeBlock()
-            self.characters(text)
-            self.endCodeBlock()
-        else:
-            self.beginCodeInline()
-            self.characters(text)
-            self.endCodeInline()
+    #         self.beginCodeBlock()
+    #         self.characters(text)
+    #         self.endCodeBlock()
+    #     else:
+    #         self.beginCodeInline()
+    #         self.characters(text)
+    #         self.endCodeInline()
