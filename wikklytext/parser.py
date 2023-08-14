@@ -19,15 +19,16 @@ GNU General Public License for more details.
 """
 
 import re, copy
-
 import ply.lex
 
-from .exceptions import WikklyError, ParseError, UnknownMacro, Location
-from .base import MacroLibrary
+from tinymarkup.exceptions import (InternalError, ParseError,
+                                   UnknownMacro, Location)
+from tinymarkup.macro import MacroLibrary
+
 from . import lextokens
 
 wikkly_base_lexer = ply.lex.lex(module=lextokens,
-                                reflags=re.M|re.I|re.S,
+                                reflags=re.MULTILINE|re.IGNORECASE|re.DOTALL,
                                 optimize=False,
                                 lextab=None)
 
@@ -501,8 +502,8 @@ class WikklyParser(object):
 
                 else:
                     # cannot reach ... if my logic is correct :-)
-                    raise WikklyError("** INTERNAL ERROR in N_LISTITEM **",
-                                      location=compiler.location)
+                    raise InternalError("** INTERNAL ERROR in N_LISTITEM **",
+                                        location=compiler.location)
 
             elif tok.type == 'U_LISTITEM':
                 end_current_block()
@@ -566,8 +567,8 @@ class WikklyParser(object):
 
                 else:
                     # cannot reach ... if my logic is correct :-)
-                    raise WikklyError("** INTERNAL ERROR in N_LISTITEM **",
-                                      location=compiler.location)
+                    raise InternalError("** INTERNAL ERROR in N_LISTITEM **",
+                                        location=compiler.location)
 
             elif tok.type == 'HEADING':
                 # inside a table, this is a regular char
