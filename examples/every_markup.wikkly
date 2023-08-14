@@ -2,11 +2,11 @@
 
 !! Überschrift
 
-I am a paragraph with all available inline markup in it. Some are ''bold'' things to say, some are styled in //italics//. One might need to --strike through-- certain passages of text or __underline__ them. Numbers or other things might need^^superscript^^ or ~~subscript~~. @@Highlighting@@ may also occur.
+I am a paragraph with all available inline markup in it. Some are ''bold'' things to say, some are styled in //italics//. One might need to --strike through-- certain passages of text or __underline__ them. Numbers or other things might need^^superscript^^ or ~~subscript~~. 
 
 > Those writing English might want indented first lines of paragraphs. For this to become a paragraph, it probably needs to be a little longer.
 
-This paragraph has a section with a CSS style applied to it: {{css-class{This part is it!}}}
+This paragraph has a section with a CSS style applied to it: {{red{This part is it!}}}
 
 Horizontal separator:
 
@@ -29,9 +29,11 @@ Ich bin ein [[Link]] in einem Absatz.
 • Punkt
 • Noch einer
 
+/%
 {{{
 print("Hallo Welt!")
 }}}
+%/
 
 /% Ich bin ein Wikkly-Kommentar. %/
 
@@ -47,7 +49,7 @@ Zitat:
 
 <<<
   Hallo Welt, ich bin ein Zitat. Glaube ich.
-<<<
+>>>
 
 Ut wisi enim ad minim veniam, quis nostrud exerci tation ullamcorper suscipit lobortis nisl ut aliquip ex ea commodo consequat. Duis autem vel eum iriure dolor in hendrerit in vulputate velit esse molestie consequat, vel illum dolore eu feugiat nulla facilisis at vero eros et accumsan et iusto odio dignissim qui blandit praesent luptatum zzril delenit augue duis dolore te feugait nulla facilisi.
 
