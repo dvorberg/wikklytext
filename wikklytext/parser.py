@@ -18,12 +18,58 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 GNU General Public License for more details.
 """
 
-import re
+import re, copy
 
-from .exceptions import WikklyError, ParseError, UnknownMacro
-from .tokens import parse_macro_parameter_list_from
-from .lexer import WikklyLexer, starts_with_parbreak
+import ply.lex
+
+from .exceptions import WikklyError, ParseError, UnknownMacro, Location
 from .base import MacroLibrary
+from . import lextokens
+
+wikkly_base_lexer = ply.lex.lex(module=lextokens,
+                                reflags=re.M|re.I|re.S,
+                                optimize=False,
+                                lextab=None)
+
+class LexerWrapper(object):
+    """
+    Prettify some of ply.lex.lex()’s functionality.
+    """
+    def __init__(self, ply_lexer):
+        self.base = copy.copy(ply_lexer)
+
+    def tokenize(self, source):
+        self._source = source
+        self.base.input(source.lstrip())
+
+        while True:
+            token = self.base.token()
+            if not token:
+                break
+            else:
+                yield token
+
+    @property
+    def location(self):
+        return Location.from_baselexer(self.base)
+
+    @property
+    def remainder(self):
+        return lextokens._get_remainder(self.base)
+
+    @property
+    def lexpos(self):
+        return self.base.lexpos
+
+    @lexpos.setter
+    def lexpos(self, lexpos):
+        self.base.lexpos = lexpos
+
+    @remainder.setter
+    def remainder(self, remainder):
+        lextokens._set_remainder(self.base, remainder)
+
+
 
 paragraph_break_re = re.compile("\n\n+")
 class WikklyParser(object):
@@ -49,7 +95,7 @@ class WikklyParser(object):
 
         # state vars - most of these are local context only, but some are set
         # into self if they are needed above
-        self.lexer = WikklyLexer()
+        self.lexer = LexerWrapper(wikkly_base_lexer)
 
         self.in_bold = 0
         self.in_italic = 0
@@ -125,8 +171,9 @@ class WikklyParser(object):
                 macro = None
             else:
                 if macro_end == "(":
-                    remainder, args, kw = parse_macro_parameter_list_from(
-                        compiler.location, lexer.remainder, "):")
+                    remainder, args, kw = \
+                        lextokens.parse_macro_parameter_list_from(
+                            compiler.location, lexer.remainder, "):")
                     lexer.remainder = remainder
 
                 macro_class = compiler.context.macro_library.get(
@@ -772,3 +819,8 @@ class WikklyParser(object):
             last_token = (tok.type,tok.value)
 
         compiler.endDoc()
+
+parbreak_re = re.compile(lextokens.t_EOLS.__doc__)
+def starts_with_parbreak(remainder):
+    match = parbreak_re.match(remainder)
+    return (match is not None and match.group().count("\n") >= 2)
