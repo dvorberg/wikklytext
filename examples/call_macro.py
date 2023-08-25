@@ -1,80 +1,54 @@
 import time
 from io import StringIO
 
-from wikklytext import to_html, to_inline_html, Context
-from wikklytext.macros import (InlineMacro, BlockLevelMacro,
-                               MacroLibrary, macromethod)
+from wikklytext.to_html import to_html, to_inline_html, Context
+from wikklytext.macro import WikklyMacro, MacroLibrary, WikklySource
 
-class LanguageMacro(InlineMacro):
-    @macromethod
-    def html(self, contents:to_inline_html):
-        return f'<span lang="{self.name}">{contents}</span>'
+class Bild(WikklyMacro):
+    name = "bild"
 
-    @macromethod
-    def span_params(self):
-        return { "lang": self.name, }
-
-class German(LanguageMacro):
-    name = "de"
-
-class English(LanguageMacro):
-    name = "en"
-
-class NamedLanguageMacro(InlineMacro):
-    name = "lang"
-
-    @macromethod
-    def html(self, lang, contents:to_inline_html):
-        return f'<span lang="{lang}">{contents}</span>'
-
-    @macromethod
-    def span_params(self, lang):
-        return { "lang": lang, }
-
-
-class Bild(BlockLevelMacro):
-    @macromethod
-    def html(self, filename):
+    def html_element(self, filename):
         return f'<figure><img src="{filename}" /></figure>'
 
-pprint = print
-class TestMacro(BlockLevelMacro):
-    @macromethod
-    def html(self, *args, **kw):
-        fp = StringIO()
+class red(WikklyMacro):
+    def tag_params(self):
+        return { "style": "color: red; font-weight: bold"}
 
-        def print(*args):
-            pprint(*args, file=fp)
+    def html_element(self, contents:WikklySource):
+        return self.start_tag() + contents.html() + self.end_tag
 
-        print("Args")
-        for arg in args:
-            print(repr(arg))
-        print()
+macro_library = MacroLibrary(Bild, red)
+    #NamedLanguageMacro,
+    # German, English, Bild, TestMacro)
 
-        print("kw")
-        for name, value in kw.items():
-            print(name, "=", repr(value))
-        print()
+# Hallo Welt!
+#
+# <<bild "hallo.jpg">>
 
-        return f'<pre>{fp.getvalue()}</pre>'
+wikkly = """\
+Ich bin ein Absatz mit {{red{rotem, fettem}}} Text drin. Ich bin auch
+<<red "rot und fett">>, aber mit dem anderen Syntax.
 
-macro_library = MacroLibrary(NamedLanguageMacro,
-                             German, English, Bild, TestMacro)
+<<red "Ich bin roter, fetter Text mit meinem eigenen Absatz.">>
 
-def main():
-    with open("call_macro.wikkly") as fp:
-        wikkly = fp.read()
+<<red "Ich bin roter, fetter Text mit meinem eigenen Absatz.">> Doch hinter
+mir steht normaler Text.
 
-    wikkly2 = """\
+<<red '''
+Mehrere rote
 
+Absätze.
+'''>>
 
-Hallo Welt!
-
-<<bild "hallo.jpg">>
-
-Ende.
 """
 
+
+
+
+# Ende.
+
+
+def main():
     t = time.time()
     html = to_html(wikkly, Context(macro_library))
     print("%.4fsec" % (time.time() - t))
