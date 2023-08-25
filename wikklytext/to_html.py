@@ -18,23 +18,33 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 GNU General Public License for more details.
 """
 
-import sys, re, html
+import sys, re, html, inspect, io
 from io import StringIO
+from html import escape as escape_html
 
-from tinymarkup.exceptions import InternalError, RestrictionError
+from tinymarkup.compiler import HTMLCompiler_mixin
 from tinymarkup.context import Context
-from tinymarkup.macro import Macro, call_macro_method
+from tinymarkup.exceptions import ( MarkupError, InternalError,
+                                    RestrictionError,  UnsuitableMacro, )
 from tinymarkup.utils import html_start_tag
+from tinymarkup.cmdline import CmdlineTool
 
+from .parser import WikklyParser
 from .compiler import WikklyCompiler
 
 def to_html(wikkly, context:Context=None):
-    compiler = HTMLCompiler(context)
-    return compiler.compile(wikkly)
+    outfile = io.StringIO()
+    parser = WikklyParser()
+    compiler = HTMLCompiler(context, outfile)
+    compiler.compile(parser, wikkly)
+    return outfile.getvalue()
 
 def to_inline_html(wikkly, context:Context=None):
-    compiler = InlineHTMLCompiler(context)
-    return compiler.compile(wikkly)
+    outfile = io.StringIO()
+    parser = WikklyParser()
+    compiler = InlineHTMLCompiler(context, outfile)
+    compiler.compile(parser, wikkly)
+    return outfile.getvalue()
 
 class TableCell(object):
     def __init__(self, header:bool, params:dict):
@@ -146,7 +156,7 @@ class Table(object):
             # to the original output.
             self.write_table()
 
-class HTMLCompiler(WikklyCompiler):
+class HTMLCompiler(WikklyCompiler, HTMLCompiler_mixin):
     block_level_tags = { "div", "p", "ol", "ul", "li", "blockquote", "code",
                          "table", "tbody", "thead", "tr", "td", "th",
                          "dl", "dt", "dd",
@@ -155,15 +165,14 @@ class HTMLCompiler(WikklyCompiler):
     # Tags that like to stand on a line by themselves.
     loner_tags = { "ol", "ul", "code", "table", "tbody", "thead", "tr", "dl",}
 
-    def __init__(self, context=None):
-        super().__init__(context)
+    def __init__(self, context, output):
+        WikklyCompiler.__init__(self, context)
+        HTMLCompiler_mixin.__init__(self, output)
         self._table = None
 
-    def compile(self, source):
-        self.output = StringIO()
+    def compile(self, parser, source):
         self.tag_stack = []
-        super().compile(source)
-        return self.output.getvalue()
+        super().compile(parser, source)
 
     def print(self, *args, **kw):
         print(*args, **kw, file=self.output)
@@ -197,9 +206,16 @@ class HTMLCompiler(WikklyCompiler):
             raise InternalError(f"Internal error. HTML nesting failed. "
                                 f"Can’t close “{tag}”. "
                                 f"Tag stack: {repr(self.tag_stack)}.",
-                                location=self.location)
+                                location=self.compiler.location)
         else:
             self.tag_stack.pop()
+
+    def begin_document(self, lexer):
+        super().begin_document(lexer)
+        self.begin_html_document()
+
+    def end_document(self):
+        self.close_all()
 
     def close_all(self):
         if self._table:
@@ -207,13 +223,6 @@ class HTMLCompiler(WikklyCompiler):
 
         while self.tag_stack:
             self.close(self.tag_stack[-1])
-
-    def beginDoc(self):
-        pass
-        #self.open("p")
-
-    def endDoc(self):
-        self.close_all()
 
     def beginParagraph(self): self.open("p")
     def endParagraph(self): self.close("p")
@@ -248,7 +257,7 @@ class HTMLCompiler(WikklyCompiler):
         print("endCodeInline")
 
     def characters(self, txt):
-        self.print(txt, end="")
+        self.print(escape_html(txt), end="")
 
     def beginNList(self): self.open("ol")
     def endNList(self): self.close("ol")
@@ -284,8 +293,9 @@ class HTMLCompiler(WikklyCompiler):
 
     def beginBlockquote(self, macro, args, kw):
         if macro is not None:
-            params = call_macro_method(
-                macro.tag_params, args, kw, self.location)
+            params = self.call_macro_method(
+                macro.tag_params, args, kw,
+                self.parser.location)
         else:
             params = {}
 
@@ -319,8 +329,9 @@ class HTMLCompiler(WikklyCompiler):
     def setTableCaption(self, caption:str, macro, args, kw):
         self._table.caption = caption
         if macro is not None:
-            self._table.tag_params = call_macro_method(
-                macro.tag_params, args, kw, self.location)
+            self._table.tag_params = self.call_macro_method(
+                macro.tag_params, args, kw,
+                self.parser.location)
 
     def beginTableRow(self):
         self._table.make_row()
@@ -332,8 +343,8 @@ class HTMLCompiler(WikklyCompiler):
         if macro is None:
             params = {}
         else:
-            params = call_macro_method(macro.tag_params,
-                                       args, kw, location=self.location)
+            params = self.call_macro_method(macro.tag_params, args, kw,
+                                            location=self.parser.location)
         self._table.make_cell(header, params)
 
     def endTableCell(self):
@@ -371,20 +382,24 @@ class HTMLCompiler(WikklyCompiler):
     def linebreak(self):
         self.print("<br />", end="")
 
-    def call_macro(self, what, macro, args, kw):
-        if what == "block":
+    def call_macro(self, environment, macro_class, args, kw, location):
+        try:
+            macro = macro_class(self.context, environment)
+        except UnsuitableMacro as exc:
+            exc.location = location
+            raise
+
+        if environment == "block":
             self.close_all()
-            self.print(call_macro_method(macro.block_html, args, kw,
-                                         location=self.location))
-        elif what == "inline":
-            self.print(call_macro_method(macro.inline_html, args, kw,
-                                         location=self.location), end="")
-        elif what == "openspan":
-            self.open("span", **call_macro_method(macro.tag_params,
-                                                  args, kw,
-                                                  location=self.location))
-        else:
-            raise ValueError(what)
+
+        self.print(self.call_macro_method(macro.html_element, args, kw,
+                                          location=location),
+                   end=macro.end)
+
+    def startStartTagMacro(self, macro_class, args, kw):
+        macro = macro_class(self.context, "inline")
+        self.open("span", **self.call_macro_method(
+            macro.tag_params, args, kw, location=self.parser.location))
 
     def endStartTagMacro(self):
         self.close("span")
@@ -399,19 +414,36 @@ class InlineHTMLCompiler(HTMLCompiler):
 
     def beginTable(self):
         raise RestrictionError("You may not use tables in inline markup.",
-                               location=self.location)
-
-    def characters(self, txt):
-        self.print(txt, end="")
+                               location=self.parser.location)
 
     def open(self, tag, **params):
         if tag in self.block_level_tags:
             raise RestrictionError("You may only use inline markup "
                                    "in this context.",
-                                   location=self.location)
+                                   location=self.parser.location)
         super().open(tag, **params)
 
-    def call_macro(self, what, macro, args, kw):
+    def call_macro(self, what, macro, args, kw, location):
         if what == "block":
             what = "inline"
-        return super().call_macro(what, macro, args, kw)
+        return super().call_macro(what, macro, args, kw, location)
+
+
+
+class CmdlineTool(CmdlineTool):
+    def default_context(self):
+        return Context()
+
+    def to_html(self, outfile, source):
+        context = self.default_context()
+        parser = WikklyParser()
+        compiler = HTMLCompiler(context, outfile)
+        compiler.compile(parser, source)
+
+
+def cmdline_main(context:Context=None):
+    cmdline_tool = CmdlineTool(context)
+    cmdline_tool()
+
+if __name__ == "__main__":
+    cmdline_main()
