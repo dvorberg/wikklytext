@@ -24,56 +24,18 @@ import ply.lex
 from tinymarkup.exceptions import (InternalError, ParseError,
                                    UnknownMacro, Location)
 from tinymarkup.macro import MacroLibrary
+from tinymarkup.parser import Parser
 
 from . import lextokens
+from .compiler import WikklyCompiler
 
 wikkly_base_lexer = ply.lex.lex(module=lextokens,
                                 reflags=re.MULTILINE|re.IGNORECASE|re.DOTALL,
                                 optimize=False,
                                 lextab=None)
 
-class LexerWrapper(object):
-    """
-    Prettify some of ply.lex.lex()’s functionality.
-    """
-    def __init__(self, ply_lexer):
-        self.base = copy.copy(ply_lexer)
-
-    def tokenize(self, source):
-        self._source = source
-        self.base.input(source.lstrip())
-
-        while True:
-            token = self.base.token()
-            if not token:
-                break
-            else:
-                yield token
-
-    @property
-    def location(self):
-        return Location.from_baselexer(self.base)
-
-    @property
-    def remainder(self):
-        return lextokens._get_remainder(self.base)
-
-    @property
-    def lexpos(self):
-        return self.base.lexpos
-
-    @lexpos.setter
-    def lexpos(self, lexpos):
-        self.base.lexpos = lexpos
-
-    @remainder.setter
-    def remainder(self, remainder):
-        lextokens._set_remainder(self.base, remainder)
-
-
-
 paragraph_break_re = re.compile("\n\n+")
-class WikklyParser(object):
+class WikklyParser(Parser):
     """
     Base class for content parser showing the required API.
 
@@ -81,13 +43,9 @@ class WikklyParser(object):
     tokens from the lexer.
     """
     def __init__(self):
-        pass
+        super().__init__(wikkly_base_lexer)
 
-    @property
-    def location(self):
-        return self.lexer.location
-
-    def parse(self, source, compiler):
+    def parse(self, source:str, compiler:WikklyCompiler):
         # flags:
         #   * need to use re.M so beginning-of-line matches will
         #     work as expected
@@ -96,8 +54,6 @@ class WikklyParser(object):
 
         # state vars - most of these are local context only, but some are set
         # into self if they are needed above
-        self.lexer = LexerWrapper(wikkly_base_lexer)
-
         self.in_bold = 0
         self.in_italic = 0
         self.in_strikethrough = 0
@@ -174,12 +130,13 @@ class WikklyParser(object):
                 if macro_end == "(":
                     remainder, args, kw = \
                         lextokens.parse_macro_parameter_list_from(
-                            compiler.location, lexer.remainder, "):")
+                            self.location, lexer.remainder, "):")
                     lexer.remainder = remainder
 
                 macro_class = compiler.context.macro_library.get(
-                    macro_name, compiler.location)
-                macro = macro_class(compiler.context)
+                    macro_name, self.location)
+                macro = macro_class(compiler.context,
+                                    list(macro_class.environments)[0])
 
             return (macro, args, kw)
 
@@ -198,7 +155,7 @@ class WikklyParser(object):
             match = table_cell_source_re.match(self.lexer.remainder)
             if match is None:
                 raise ParseError("Missing closing “|” for table cell.",
-                                 location=compiler.location)
+                                 location=self.location)
 
             groups = match.groupdict()
 
@@ -227,7 +184,7 @@ class WikklyParser(object):
 
         last_token = (None,None)  # type,value
 
-        compiler.beginDoc()
+        compiler.begin_document(self.lexer)
 
         for tok in self.lexer.tokenize(source):
             # print(tok)
@@ -377,7 +334,7 @@ class WikklyParser(object):
             elif tok.type == 'BLOCKQUOTE_START':
                 if self.in_blockquote:
                     raise ParseError("Blockquotes can’t nest.",
-                                     location=compiler.location)
+                                     location=self.location)
 
                 groups = lexmatch.groupdict()
                 macro, args, kw = get_macro_for(
@@ -389,7 +346,7 @@ class WikklyParser(object):
             elif tok.type == "BLOCKQUOTE_END":
                 if not self.in_blockquote:
                     raise ParseError("Missing beginning of blockquote.",
-                                     location=compiler.location)
+                                     location=self.location)
                 if self.in_paragraph:
                     compiler.endParagraph()
                     self.in_paragraph = False
@@ -503,7 +460,7 @@ class WikklyParser(object):
                 else:
                     # cannot reach ... if my logic is correct :-)
                     raise InternalError("** INTERNAL ERROR in N_LISTITEM **",
-                                        location=compiler.location)
+                                        location=self.location)
 
             elif tok.type == 'U_LISTITEM':
                 end_current_block()
@@ -568,7 +525,7 @@ class WikklyParser(object):
                 else:
                     # cannot reach ... if my logic is correct :-)
                     raise InternalError("** INTERNAL ERROR in N_LISTITEM **",
-                                        location=compiler.location)
+                                        location=self.location)
 
             elif tok.type == 'HEADING':
                 # inside a table, this is a regular char
@@ -598,9 +555,8 @@ class WikklyParser(object):
                 self.inline_block_stack.append(name)
 
                 macro_class = compiler.context.macro_library.get(
-                    name, compiler.location)
-                macro = macro_class(compiler.context)
-                compiler.call_macro("openspan", macro, args=[], kw={})
+                    name, self.location)
+                compiler.startStartTagMacro(macro_class, (), {})
 
             elif tok.type == 'INLINE_BLOCK_END':
                 if self.inline_block_stack:
@@ -609,7 +565,7 @@ class WikklyParser(object):
                     compiler.endStartTagMacro()
                 else:
                     raise ParseError("Unexpected end of “{{{”-style CSS block.",
-                                     location=compiler.location)
+                                     location=self.location)
 
             elif tok.type == 'HTML_COMMENT_START':
                 #print "******** C_COMMENT_START"
@@ -754,33 +710,37 @@ class WikklyParser(object):
             elif tok.type == 'NULLDOT':
                 pass # nothing
 
-            elif tok.type in { 'MACRO', 'START_TAG_MACRO_START' }:
+            elif tok.type == "MACRO":
                 name, args, kw = tok.value
                 macro_class = compiler.context.macro_library.get(
-                    name, compiler.location, )
+                    name, self.location, )
 
-                macro = macro_class(compiler.context)
-                last_type, last_value = last_token
-                remainder = self.lexer.remainder
-                if tok.type == "MACRO":
-                    # print("on_root_level()", repr(on_root_level()))
-                    if on_root_level():
-                        if (starts_with_parbreak(remainder) \
-                            or remainder.lstrip() == "") \
-                            and macro.block_html is not None:
-                            what = "block"
-                        else:
-                            assure_paragraph()
-                            what = "inline"
+                parbreak_before = on_root_level()
+                parbreak_after = ( starts_with_parbreak(self.lexer.remainder)
+                                   or self.lexer.remainder.lstrip() == "" )
+
+                environment = "inline"
+                if parbreak_before and parbreak_after:
+                    if ( "block" not in macro_class.environments
+                         and "inline" in macro_class.environments ):
+                        environment = "inline"
                     else:
-                        what = "inline"
+                        environment = "block"
 
-                    # print("what =", repr(what), macro)
-                    compiler.call_macro(what, macro, args, kw)
-                elif tok.type == "START_TAG_MACRO_START":
+                if environment == "inline":
                     assure_paragraph()
-                    compiler.call_macro("openspan", macro, args, kw)
-                    start_tag_macro_stack.append(name)
+
+                compiler.call_macro(environment,
+                                    macro_class, args, kw,
+                                    Location.from_lextoken(tok))
+
+
+            elif tok.type == "START_TAG_MACRO_START":
+                name, args, kw = tok.value
+                macro_class = compiler.context.macro_library.get(
+                    name, self.location, )
+
+                compiler.startStartTagMacro(macro_class, args, kw)
 
             elif tok.type == "START_TAG_MACRO_END":
                 if start_tag_macro_stack:
@@ -815,11 +775,13 @@ class WikklyParser(object):
 
                 if paragraph_break_re.match(tok.value) is not None:
                     end_current_block()
+                else:
+                    compiler.characters(" ")
 
             # remember for next pass
             last_token = (tok.type,tok.value)
 
-        compiler.endDoc()
+        compiler.end_document()
 
 parbreak_re = re.compile(lextokens.t_EOLS.__doc__)
 def starts_with_parbreak(remainder):
