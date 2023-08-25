@@ -4,8 +4,6 @@
 
 I am a paragraph with all available inline markup in it. Some are ''bold'' things to say, some are styled in //italics//. One might need to --strike through-- certain passages of text or __underline__ them. Numbers or other things might need^^superscript^^ or ~~subscript~~. 
 
-> Those writing English might want indented first lines of paragraphs. For this to become a paragraph, it probably needs to be a little longer.
-
 This paragraph has a section with a CSS style applied to it: {{red{This part is it!}}}
 
 Horizontal separator:
