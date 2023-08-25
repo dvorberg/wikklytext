@@ -157,7 +157,7 @@ tokens = (
     'NULLDOT',
     #'DELETE_ME',
     # for internal use only - keep the lexer from matching BOL as needed
-    #'WORD',
+    'WORD',
     'TEXT',
     # internally-generated, but still has to be in this list ...
     #'RAWTEXT',
@@ -255,7 +255,7 @@ t_PIPECHAR = r"\|"
 t_NULLDOT = r"^\s*\.\s*$"
 # extension: a lone dot causes the line to be ignored
 
-#t_WORD = r"[^\W_]+" # \w has the _ in it which is for underline.
+t_WORD = r"[^\W_]+" # \w has the _ in it which is for underline.
 t_TEXT = r"."
 
 def t_N_LISTITEM(t):
