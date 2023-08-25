@@ -18,33 +18,15 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 GNU General Public License for more details.
 """
 
+import inspect
+from tinymarkup.exceptions import MarkupError, ErrorInMacroCall
 from tinymarkup.context import Context
-from tinymarkup.macro import Macro, MacroLibrary
+from tinymarkup.compiler import Compiler
+from tinymarkup.macro import Macro
 
-from .parser import WikklyParser
+empty = inspect.Parameter.empty
 
-class WikklyCompiler(object):
-    def __init__(self, context:Context=None):
-        if context is None:
-            self.context = Context()
-        else:
-            self.context = context
-
-        self.parser = WikklyParser()
-
-    def compile(self, source):
-        self.parser.parse(source, self)
-
-    @property
-    def location(self):
-        return self.parser.location
-
-    def beginDoc(self):
-        print("beginDoc")
-
-    def endDoc(self):
-        print("endDoc")
-
+class WikklyCompiler(Compiler):
     def beginParagraph(self):
         print("beginParagraph")
 
@@ -227,26 +209,100 @@ class WikklyCompiler(object):
     def characters(self, txt):
         print("chars: ", repr(txt))
 
-    def call_macro(self, what, macro, args, kw):
-        print("macro: ", repr(what), repr(macro), args, kw)
+    def call_macro(self, environment, macro_class, args, kw):
+        print("macro: ", repr(environment), repr(macro_class), args, kw)
+
+    def startStartTagMacro(self, macro_class, args, kw):
+        print("startStartTagMacro: ", repr(macro_class), args, kw)
 
     def endStartTagMacro(self):
         print("end start tag macro")
 
-    # def handle_codeblock(self, text):
-    #     # multi or single line?
-    #     if '\n' in text:
-    #         # strip leading/trailing newlines
-    #         while len(text) and text[0] == '\n':
-    #             text = text[1:]
+    def call_macro_method(self, method, args, kw, location=None):
+        """
+        Wrap a macro’s html() or tsearch() function in such a way that
+        the arguments provided by
 
-    #         while len(text) and text[-1] == '\n':
-    #             text = text[:-1]
+            <<mymacro 'a' 1.2 filename='test.jpg'>>
 
-    #         self.beginCodeBlock()
-    #         self.characters(text)
-    #         self.endCodeBlock()
-    #     else:
-    #         self.beginCodeInline()
-    #         self.characters(text)
-    #         self.endCodeInline()
+        are mapped correctly to a Python function as
+
+        class MyMacro:
+            def html(self, letter, length, filename=None, color='default')
+
+        If the method raises an exception that is not a WikklyError
+        it will be wrapped in a ErrorInMacroCall. In any case,
+        the “location” information will be provided, if present.
+        """
+        parameters_by_name = inspect.signature(method).parameters
+        parameters = list(parameters_by_name.values())
+
+        def convert_maybe(value, param):
+            """
+            Provided a value from lexer.parse_macro_parameter_list_from()
+            as a string, this function will attempt to cast it to the
+            type indicated by the function parameter annotation.
+            """
+            if param.annotation is not empty:
+                kw = {}
+
+                # If the param.annotation is callable and accepts a
+                # context parameter, provide it.
+                if callable(param.annotation):
+                    try:
+                        sig = inspect.signature(param.annotation)
+                    except ValueError:
+                        pass
+                    else:
+                        for pp in sig.parameters.values():
+                            if issubclass(pp.annotation, Context):
+                                kw[pp.name] = method.__self__.context
+                            elif issubclass(pp.annotation, Macro):
+                                kw[pp.name] = method.__self__
+
+                try:
+                    return param.annotation(value, **kw)
+                except MarkupError as exc:
+                    if exc.location:
+                        exc.location.lineno += location.lineno - 1
+                    raise exc
+                #ErrorInMacroCall(f"Error in wikkly for {param.name}.",
+                #                           location=location) from exc
+            else:
+                # These will be provided as strings by
+                # parse_macro_pa_list_from()
+                # except for `self`.
+                return value
+
+        # These are provided as positional arguments.
+        positional = parameters[:len(args)]
+        # These came with identifier= keywords.
+        throughkw = parameters[len(args):]
+
+        # Convert the positional arguments.
+        args = [ convert_maybe(arg, param)
+                 for arg, param in zip(args, positional) ]
+
+        # Convert the keyword arguments.
+        kw = dict([ (name, convert_maybe(value, parameters_by_name[name]),)
+                    for name, value in kw.items() ])
+
+        # Fill up the **kw dict to have the provided default values
+        # in it.
+        for param in throughkw:
+            if not param.name in kw and param.default is not empty:
+                kw[param.name] = param.default
+
+        # Call the method.
+        try:
+            if "location" in kw and not "location" in parameters_by_name:
+                del kw["location"]
+
+            return method(*args, **kw)
+        except Exception as exc:
+            if not isinstance(exc, MarkupError):
+                raise ErrorInMacroCall(f"Error calling {method}",
+                                       location=location) from exc
+            else:
+                exc.location = location
+                raise exc
