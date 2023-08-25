@@ -1,7 +1,6 @@
-
-
-
 Hallo Welt, ich bin der erste Absatz.
+
+This paragraph has a section with a CSS style applied to it: {{red{This part is it!}}}
 
 Ich bin deutscher Text. <<en "I am English text.">> Ich bin wieder deutscher Text. Ich bin ein [[Link]].
 
