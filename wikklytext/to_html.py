@@ -215,7 +215,7 @@ class HTMLCompiler(WikklyCompiler, HTMLCompiler_mixin):
         self.begin_html_document()
 
     def end_document(self):
-        self.close_all()
+        self.end_html_document()
 
     def close_all(self):
         if self._table:
@@ -256,8 +256,12 @@ class HTMLCompiler(WikklyCompiler, HTMLCompiler_mixin):
     def endCodeInline(self):
         print("endCodeInline")
 
-    def characters(self, txt):
+    # These are treated the same for HTML,
+    # but different in tsearch.
+    def _characters(self, txt):
         self.print(escape_html(txt), end="")
+    word = _characters
+    other_characters = _characters
 
     def beginNList(self): self.open("ol")
     def endNList(self): self.close("ol")
@@ -308,10 +312,6 @@ class HTMLCompiler(WikklyCompiler, HTMLCompiler_mixin):
         self.open("a", href=target or text)
         self.print(text, end="")
         self.close("a")
-
-    def handleImgLink(self, title, filename, url):
-        print("handleImgLink title=%s, filename=%s, url=%s" % (
-            title, filename, url))
 
     def beginCodeBlock(self):
         self.open("code")
@@ -431,13 +431,12 @@ class InlineHTMLCompiler(HTMLCompiler):
 
 
 class CmdlineTool(CmdlineTool):
-    def default_context(self):
-        return Context()
+    def make_context(self, extra_context):
+        self.context = extra_context or Context()
 
     def to_html(self, outfile, source):
-        context = self.default_context()
         parser = WikklyParser()
-        compiler = HTMLCompiler(context, outfile)
+        compiler = HTMLCompiler(self.context, outfile)
         compiler.compile(parser, source)
 
 
