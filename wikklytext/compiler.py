@@ -22,6 +22,7 @@ import inspect
 from tinymarkup.exceptions import MarkupError, ErrorInMacroCall
 from tinymarkup.context import Context
 from tinymarkup.compiler import Compiler
+from tinymarkup.writer import Writer
 from tinymarkup.macro import Macro
 
 empty = inspect.Parameter.empty
@@ -260,6 +261,8 @@ class WikklyCompiler(Compiler):
                         for pp in sig.parameters.values():
                             if issubclass(pp.annotation, Context):
                                 kw[pp.name] = method.__self__.context
+                            if issubclass(pp.annotation, Writer):
+                                kw[pp.name] = self.writer
                             elif issubclass(pp.annotation, Macro):
                                 kw[pp.name] = method.__self__
 
