@@ -22,7 +22,7 @@ import sys, re, html, inspect, io
 from io import StringIO
 from html import escape as escape_html
 
-from tinymarkup.compiler import HTMLCompiler_mixin
+from tinymarkup.writer import HTMLWriter
 from tinymarkup.context import Context
 from tinymarkup.exceptions import ( MarkupError, InternalError,
                                     RestrictionError,  UnsuitableMacro, )
@@ -68,7 +68,7 @@ class Table(object):
         self._caption = None
         self.tag_params = {}
         self._rows = []
-        self.compiler.tag_stack.append("--in-table--")
+        self.compiler.writer.tag_stack.append("--in-table--")
 
     @property
     def current_row(self):
@@ -143,7 +143,7 @@ class Table(object):
         close("table")
 
     def finalize(self):
-        if self.compiler.tag_stack.pop() != "--in-table--":
+        if self.compiler.writer.tag_stack.pop() != "--in-table--":
             raise InternalError("Internal Error: Table nesting failed.",
                                 location=self.compiler.location)
 
@@ -156,7 +156,7 @@ class Table(object):
             # to the original output.
             self.write_table()
 
-class HTMLCompiler(WikklyCompiler, HTMLCompiler_mixin):
+class HTMLCompiler(WikklyCompiler):
     block_level_tags = { "div", "p", "ol", "ul", "li", "blockquote", "code",
                          "table", "tbody", "thead", "tr", "td", "th",
                          "dl", "dt", "dd",
@@ -167,62 +167,39 @@ class HTMLCompiler(WikklyCompiler, HTMLCompiler_mixin):
 
     def __init__(self, context, output):
         WikklyCompiler.__init__(self, context)
-        HTMLCompiler_mixin.__init__(self, output)
+        self.writer = HTMLWriter(output, context.root_language)
+
+        # Hook the writer’s methods into self for convenience
+        # (and so I don't have to re-debug this whole thing).
+        self.open = self.writer.open
+        self.close = self.writer.close
+        self.print = self.writer.print
+
         self._table = None
+        self.write_root_language_tag()
+
+    def write_root_language_tag(self):
+        self.writer.write_root_language_tag()
+
+    # The table handling code above expects compiler.output to be there.
+    @property
+    def output(self):
+        return self.writer.output
+
+    @output.setter
+    def output(self, file):
+        self.writer.output = file
 
     def compile(self, parser, source):
-        self.tag_stack = []
         super().compile(parser, source)
-
-    def print(self, *args, **kw):
-        print(*args, **kw, file=self.output)
 
     def get_html(self):
         return self.output.getvalue()
 
-    def open(self, tag, **params):
-        # If we’re in a <p> and we’re opening a block level element,
-        # close the <p> first.
-        #if self.tag_stack and self.tag_stack[-1] == "p" \
-        #   and tag in self.block_level_tags:
-        #    self.close("p")
-        if tag in self.loner_tags:
-            end = "\n"
-        else:
-            end = ""
-
-        self.print(html_start_tag(tag, **params), end=end)
-        self.tag_stack.append(tag)
-
-    def close(self, tag):
-        if tag in self.block_level_tags:
-            end = "\n"
-        else:
-            end = ""
-
-        self.print(f"</{tag}>", end=end)
-
-        if not self.tag_stack or self.tag_stack[-1] != tag:
-            raise InternalError(f"Internal error. HTML nesting failed. "
-                                f"Can’t close “{tag}”. "
-                                f"Tag stack: {repr(self.tag_stack)}.",
-                                location=self.compiler.location)
-        else:
-            self.tag_stack.pop()
-
-    def begin_document(self, lexer):
-        super().begin_document(lexer)
-        self.begin_html_document()
-
     def end_document(self):
-        self.end_html_document()
-
-    def close_all(self):
         if self._table:
             self.endTable()
-
-        while self.tag_stack:
-            self.close(self.tag_stack[-1])
+        self.writer.close_all()
 
     def beginParagraph(self): self.open("p")
     def endParagraph(self): self.close("p")
@@ -390,7 +367,9 @@ class HTMLCompiler(WikklyCompiler, HTMLCompiler_mixin):
             raise
 
         if environment == "block":
-            self.close_all()
+            if self._table:
+                self.endTable()
+            self.writer.close_all()
 
         self.print(self.call_macro_method(macro.html_element, args, kw,
                                           location=location),
@@ -406,6 +385,9 @@ class HTMLCompiler(WikklyCompiler, HTMLCompiler_mixin):
 
 
 class InlineHTMLCompiler(HTMLCompiler):
+    def write_root_language_tag(self):
+        pass
+
     def beginParagraph(self):
         pass
 
