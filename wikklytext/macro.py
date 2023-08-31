@@ -18,7 +18,11 @@ import re
 from tinymarkup.macro import Macro, MacroLibrary
 from tinymarkup.context import Context
 from tinymarkup.utils import html_start_tag
+from tinymarkup.compiler import TSearchWriter
+
 from .to_html import to_html, to_inline_html
+from .parser import WikklyParser
+from .to_tsearch import TSearchCompiler
 from . import lextokens
 
 class WikklyMacro(Macro):
@@ -91,6 +95,12 @@ class WikklyMacro(Macro):
         """
         return self.start_tag(*args, **kw) + self.end_tag
 
+    def add_searchable_text(self, writer:TSearchWriter, *args, **kw):
+        """
+        Called by the tsearch compiler.
+        """
+        pass
+
 eols_re = re.compile(lextokens.t_EOLS.__doc__)
 class WikklySource(object):
     def __init__(self, source, context:Context, macro:WikklyMacro):
@@ -108,7 +118,7 @@ class WikklySource(object):
 
     def has_paras(self):
         """
-        Return whether the source contains multiple Wikkly Paragraphs
+        Return whether the source contains multiple Wikkly paragraphs.
         """
         result = eols_re.search(self.source)
         if result is not None:
@@ -116,6 +126,16 @@ class WikklySource(object):
             return (value.count("\n") > 1)
 
         return False
+
+    def add_searchable_text(self, writer:TSearchWriter):
+        """
+        Called by the tsearch compiler.
+        """
+        parser = WikklyParser()
+        compiler = TSearchCompiler(self.context, None)
+        compiler.writer = writer
+        compiler.compile(parser, self.source)
+
 
 ############################################################
 ## Misc. Macro base classes
@@ -139,6 +159,16 @@ class LanguageMacro(DecoratorMacro):
     """
     def tag_params(self):
         return { "lang": self.get_name(), }
+
+    def add_searchable_text(self,
+                            writer:TSearchWriter,
+                            contents:WikklySource=None):
+
+        writer.push_language(self.context.language_by_iso(self.get_name()))
+        if contents is not None:
+            contents.add_searchable_text(writer)
+            writer.pop_language()
+
 
 class ClassMacro(DecoratorMacro):
     """
