@@ -206,8 +206,11 @@ class WikklyCompiler(Compiler):
     def linebreak(self):
         print("linebreak")
 
-    def characters(self, txt):
-        print("chars: ", repr(txt))
+    def word(self, txt):
+        print("word: ", repr(txt))
+
+    def other_characters(self, txt):
+        print("other_chars: ", repr(txt))
 
     def call_macro(self, environment, macro_class, args, kw):
         print("macro: ", repr(environment), repr(macro_class), args, kw)
@@ -261,7 +264,10 @@ class WikklyCompiler(Compiler):
                                 kw[pp.name] = method.__self__
 
                 try:
-                    return param.annotation(value, **kw)
+                    if isinstance(value, param.annotation):
+                        return value
+                    else:
+                        return param.annotation(value, **kw)
                 except MarkupError as exc:
                     if exc.location:
                         exc.location.lineno += location.lineno - 1
