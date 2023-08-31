@@ -1,10 +1,22 @@
-! Titel
+A block quote:
 
-!! Überschrift
+<<<de:
+  Hallo Welt, ich bin ein Zitat. Glaube ich.
+>>>
+
+I am an English paragraph.
+
+I am an English paragraph also but I have some <<de "deutschem Text">> in me.
+
+! Title
+
+!! Heading
 
 I am a paragraph with all available inline markup in it. Some are ''bold'' things to say, some are styled in //italics//. One might need to --strike through-- certain passages of text or __underline__ them. Numbers or other things might need^^superscript^^ or ~~subscript~~. 
 
+
 This paragraph has a section with a CSS style applied to it: {{red{This part is it!}}}
+
 
 Horizontal separator:
 
@@ -42,12 +54,6 @@ Duis autem vel eum iriure dolor in hendrerit in vulputate velit esse molestie co
 Definition:
 ; Ich
 : Mensch
-
-Zitat:
-
-<<<
-  Hallo Welt, ich bin ein Zitat. Glaube ich.
->>>
 
 Ut wisi enim ad minim veniam, quis nostrud exerci tation ullamcorper suscipit lobortis nisl ut aliquip ex ea commodo consequat. Duis autem vel eum iriure dolor in hendrerit in vulputate velit esse molestie consequat, vel illum dolore eu feugiat nulla facilisis at vero eros et accumsan et iusto odio dignissim qui blandit praesent luptatum zzril delenit augue duis dolore te feugait nulla facilisi.
 
