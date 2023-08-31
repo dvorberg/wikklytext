@@ -273,9 +273,13 @@ class WikklyParser(Parser):
                             compiler.endUListItem()
                             compiler.endUList()
 
-            if tok.type in { 'WORD', 'TEXT' }:
+            if tok.type == 'WORD':
                 assure_paragraph()
-                compiler.characters(tok.value)
+                compiler.word(tok.value)
+
+            elif tok.type == 'OTHER_CHARACTERS':
+                assure_paragraph()
+                compiler.other_characters(tok.value)
 
             elif tok.type == 'BOLD':
                 assure_paragraph()
@@ -533,7 +537,7 @@ class WikklyParser(Parser):
                 # know to switch to <th>, etc.)
                 if in_table:
                     #print "RAWTEXT HEADING"
-                    compiler.characters(tok.rawtext)
+                    compiler.word(tok.rawtext)
                     continue
 
                 compiler.beginHeading(len(tok.value))
@@ -571,7 +575,7 @@ class WikklyParser(Parser):
                 #print "******** C_COMMENT_START"
                 if in_html_comment:
                     # already in HTML comment, treat as normal chars
-                    compiler.characters(tok.value)
+                    compiler.word(tok.value)
                 else:
                     # begin HTML comment (strip comment markers)
                     in_html_comment = 1
@@ -580,7 +584,7 @@ class WikklyParser(Parser):
                 #print "************* C_COMMENT_END"
                 if not in_html_comment:
                     # not in HTML-comment, treat as normal chars
-                    compiler.characters(tok.value)
+                    compiler.word(tok.value)
                 else:
                     # strip end markers
                     in_html_comment = 0
@@ -653,7 +657,7 @@ class WikklyParser(Parser):
                     # split | portion from "\n" portion
                     m = re.match(self.lexer.t_TABLEROW_END,
                                  tok.value, re.M|re.I|re.S)
-                    compiler.characters(m.group(1))
+                    compiler.word(m.group(1))
                     # feed \n back to parser
 
                     # Does this even word? Should this not talk back
@@ -669,7 +673,7 @@ class WikklyParser(Parser):
                     # split | portion from "\n" portion
                     m = re.match(self.lexer.t_TABLE_END, tok.value,
                                  re.M|re.I|re.S)
-                    compiler.characters(m.group(1))
+                    compiler.word(m.group(1))
                     # feed \n's back to parser
                     self.lexer.remainder = m.group(2) + self.lexer.remainder
                 else:
@@ -698,7 +702,7 @@ class WikklyParser(Parser):
                 if in_table:
                     beginTableCell()
                 else:
-                    compiler.characters(tok.value)
+                    compiler.other_characters(tok.value)
 
             elif tok.type == 'SEPARATOR':
                 compiler.separator()
@@ -776,7 +780,7 @@ class WikklyParser(Parser):
                 if paragraph_break_re.match(tok.value) is not None:
                     end_current_block()
                 else:
-                    compiler.characters(" ")
+                    compiler.other_characters(" ")
 
             # remember for next pass
             last_token = (tok.type,tok.value)
