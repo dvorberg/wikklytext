@@ -127,6 +127,8 @@ class TSearchCompiler(WikklyCompiler):
     def endTableRow(self): pass
 
     def beginTableCell(self, header:bool, macro, args, kw):
+        self._table_macro = None
+
         if header:
             self.writer.push_weight("C")
             self._table_cell_was_header = True
@@ -134,16 +136,18 @@ class TSearchCompiler(WikklyCompiler):
             self._table_cell_was_header = False
 
         if macro is not None:
+            self._table_macro = macro
             self.call_macro_method( macro.add_searchable_text,
                                     [self.writer,] + args, kw,
                                     self.parser.location )
 
 
     def endTableCell(self):
-        if macro is not None:
-            self.call_macro_method( macro.finish_searchable_text,
+        if self._table_macro is not None:
+            self.call_macro_method( self._table_macro.finish_searchable_text,
                                     [self.writer], {},
                                     self.parser.location )
+            self._table_macro = None
 
         if self._table_cell_was_header:
             self.writer.pop_weight()
