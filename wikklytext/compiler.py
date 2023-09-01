@@ -219,7 +219,7 @@ class WikklyCompiler(Compiler):
     def startStartTagMacro(self, macro_class, args, kw):
         print("startStartTagMacro: ", repr(macro_class), args, kw)
 
-    def endStartTagMacro(self):
+    def endStartTagMacro(self, macro_class):
         print("end start tag macro")
 
     def call_macro_method(self, method, args, kw, location=None):
@@ -299,8 +299,15 @@ class WikklyCompiler(Compiler):
         # Fill up the **kw dict to have the provided default values
         # in it.
         for param in throughkw:
-            if not param.name in kw and param.default is not empty:
-                kw[param.name] = param.default
+            if not param.name in kw:
+                if param.default is not empty:
+                    kw[param.name] = param.default
+                elif issubclass(param.annotation, Context):
+                    kw[param.name] = method.__self__.context
+                elif issubclass(param.annotation, Writer):
+                    kw[param.name] = self.writer
+                elif issubclass(param.annotation, Macro):
+                    kw[param.name] = method.__self__
 
         # Call the method.
         try:
