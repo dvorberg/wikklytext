@@ -555,18 +555,18 @@ class WikklyParser(Parser):
             elif tok.type == 'INLINE_BLOCK_START':
                 assure_paragraph()
                 name = lexmatch.groupdict()["inlblk_macro_name"]
-                # push on stack
-                self.inline_block_stack.append(name)
 
                 macro_class = compiler.context.macro_library.get(
                     name, self.location)
+                # push on stack
+                self.inline_block_stack.append(macro_class)
                 compiler.startStartTagMacro(macro_class, (), {})
 
             elif tok.type == 'INLINE_BLOCK_END':
                 if self.inline_block_stack:
                     # pop name and inform parser
-                    name = self.inline_block_stack.pop()
-                    compiler.endStartTagMacro()
+                    macro_class = self.inline_block_stack.pop()
+                    compiler.endStartTagMacro(macro_class)
                 else:
                     raise ParseError("Unexpected end of “{{{”-style CSS block.",
                                      location=self.location)
@@ -743,13 +743,13 @@ class WikklyParser(Parser):
                 name, args, kw = tok.value
                 macro_class = compiler.context.macro_library.get(
                     name, self.location, )
-
+                start_tag_macro_stack.push(macro_class)
                 compiler.startStartTagMacro(macro_class, args, kw)
 
             elif tok.type == "START_TAG_MACRO_END":
                 if start_tag_macro_stack:
-                    compiler.endStartTagMacro()
-                    start_tag_macro_stack.pop()
+                    macro_class = start_tag_macro_stack.pop()
+                    compiler.endStartTagMacro(macro_class)
                 else:
                     ParseError("Unexpected end of “@@”-style start tag macro.")
 
