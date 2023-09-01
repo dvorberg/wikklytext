@@ -37,6 +37,7 @@ class TSearchCompiler(WikklyCompiler):
 
     def endDocument(self):
         self.writer.finish_tsearch()
+    end_document = endDocument
 
     def beginParagraph(self): pass
     def endParagraph(self): self.writer.tsvector_break()
@@ -73,6 +74,7 @@ class TSearchCompiler(WikklyCompiler):
         self.writer.pop_weight()
 
     def beginBlockquote(self, macro, args, kw):
+        self._blockquote_macro = macro
         if macro is not None:
             params = self.call_macro_method(
                 macro.add_searchable_text,
@@ -80,13 +82,19 @@ class TSearchCompiler(WikklyCompiler):
                 self.parser.location)
 
     def endBlockquote(self):
-        self.writer.reset_to_root_language()
+        if self._blockquote_macro is not None:
+            params = self.call_macro_method(
+                self._blockquote_macro.finish_searchable_text,
+                [self.writer], {},
+                self.parser.location)
+            self._blockquote_macro = None
 
     def beginLineIndent(self): pass
     def endLineIndent(self): pass
 
     def handleLink(self, target, text=None):
-        self.word(text or target)
+        if not target.startswith("#"):
+            self.word(text or target)
 
     def beginCodeBlock(self): pass
     def endCodeBlock(self): pass
@@ -106,7 +114,12 @@ class TSearchCompiler(WikklyCompiler):
                 self.parser.location)
 
         self.writer.word(caption)
-        self.writer.reset_to_root_language()
+
+        if macro is not None:
+            params = self.writer.call_macro_method(
+                macro.finish_searchable_text,
+                [self.writer], kw, self.parser.location)
+
         self.writer.pop_weight()
 
 
@@ -121,16 +134,19 @@ class TSearchCompiler(WikklyCompiler):
             self._table_cell_was_header = False
 
         if macro is not None:
-            params = self.call_macro_method(
-                macro.add_searchable_text,
-                [self.writer,] + args, kw,
-                self.parser.location)
+            self.call_macro_method( macro.add_searchable_text,
+                                    [self.writer,] + args, kw,
+                                    self.parser.location )
 
 
     def endTableCell(self):
+        if macro is not None:
+            self.call_macro_method( macro.finish_searchable_text,
+                                    [self.writer], {},
+                                    self.parser.location )
+
         if self._table_cell_was_header:
             self.writer.pop_weight()
-        self.writer.reset_to_root_language()
 
     def beginDefinitionList(self): pass
     def endDefinitionList(self): pass
@@ -166,8 +182,12 @@ class TSearchCompiler(WikklyCompiler):
                                 [ self.writer, ] + list(args), kw,
                                 location=self.parser.location )
 
-    def endStartTagMacro(self):
-        pass
+    def endStartTagMacro(self, macro_class):
+        macro = macro_class(self.context, "inline")
+        self.call_macro_method( macro.finish_searchable_text,
+                                [self.writer], {},
+                                location=self.parser.location )
+
 
 class CmdlineTool(CmdlineTool):
     def to_tsearch(self, outfile, source):
