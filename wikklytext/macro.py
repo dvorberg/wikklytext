@@ -14,11 +14,11 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 GNU General Public License for more details.
 """
 
-import re
+import sys, re
 from tinymarkup.macro import Macro, MacroLibrary
 from tinymarkup.context import Context
 from tinymarkup.utils import html_start_tag
-from tinymarkup.compiler import TSearchWriter
+from tinymarkup.writer import TSearchWriter
 
 from .to_html import to_html, to_inline_html
 from .parser import WikklyParser
@@ -101,6 +101,9 @@ class WikklyMacro(Macro):
         """
         pass
 
+    def finish_searchable_text(self, writer:TSearchWriter):
+        pass
+
 eols_re = re.compile(lextokens.t_EOLS.__doc__)
 class WikklySource(object):
     def __init__(self, source, context:Context, macro:WikklyMacro):
@@ -137,6 +140,7 @@ class WikklySource(object):
         compiler.compile(parser, self.source)
 
 
+
 ############################################################
 ## Misc. Macro base classes
 
@@ -168,6 +172,9 @@ class LanguageMacro(DecoratorMacro):
         if contents is not None:
             contents.add_searchable_text(writer)
             writer.pop_language()
+
+    def finish_searchable_text(self, writer:TSearchWriter):
+        writer.pop_language()
 
 
 class ClassMacro(DecoratorMacro):
