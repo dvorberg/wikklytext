@@ -286,9 +286,12 @@ class HTMLCompiler(WikklyCompiler):
         self.close("blockquote")
 
     def handleLink(self, text, target=None):
-        self.open("a", href=target or text)
-        self.print(text, end="")
-        self.close("a")
+        target = target or text
+        if target.startswith("#"):
+            self.writer.open("a", name=target)
+            self.writer.close("a")
+        else:
+            self.print(self.context.html_link_element(target, text), end="")
 
     def beginCodeBlock(self):
         self.open("code")
@@ -380,7 +383,7 @@ class HTMLCompiler(WikklyCompiler):
         self.open("span", **self.call_macro_method(
             macro.tag_params, args, kw, location=self.parser.location))
 
-    def endStartTagMacro(self):
+    def endStartTagMacro(self, macro_class):
         self.close("span")
 
 
