@@ -176,10 +176,6 @@ class HTMLCompiler(WikklyCompiler):
         self.print = self.writer.print
 
         self._table = None
-        self.write_root_language_tag()
-
-    def write_root_language_tag(self):
-        self.writer.write_root_language_tag()
 
     # The table handling code above expects compiler.output to be there.
     @property
@@ -388,9 +384,6 @@ class HTMLCompiler(WikklyCompiler):
 
 
 class InlineHTMLCompiler(HTMLCompiler):
-    def write_root_language_tag(self):
-        pass
-
     def beginParagraph(self):
         pass
 
