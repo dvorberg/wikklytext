@@ -284,7 +284,7 @@ class HTMLCompiler(WikklyCompiler):
     def handleLink(self, text, target=None):
         target = target or text
         if target.startswith("#"):
-            self.writer.open("a", name=target)
+            self.writer.open("a", name=target[1:])
             self.writer.close("a")
         else:
             self.print(self.context.html_link_element(target, text), end="")
