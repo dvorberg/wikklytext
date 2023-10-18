@@ -219,7 +219,6 @@ class HTMLCompiler(WikklyCompiler):
     def endSubscript(self): self.close("sub")
 
     def beginHighlight(self, style=None):
-        #print("beginHighlight, style=%s" % repr(style))
         self.open("span", class_="wikkly-highlight")
     def endHighlight(self): self.close("span")
 
@@ -240,25 +239,21 @@ class HTMLCompiler(WikklyCompiler):
     def endNList(self): self.close("ol")
 
     def beginNListItem(self, txt):
-        # print("begin N-listitem:%s:" % txt)
         self.open("li")
 
     def endNListItem(self):
-        # print("end N-listitem")
         self.close("li")
 
     def beginUList(self): self.open("ul")
     def endUList(self): self.close("ul")
 
     def beginUListItem(self, txt):
-        # print("begin U-listitem:%s:" % txt)
         self.open("li")
 
     def endUListItem(self):
         self.close("li")
 
     def beginHeading(self, level):
-        # print("beginHeading:%s:" % level)
         level = int(level)
         self._current_heading_level = level
 
