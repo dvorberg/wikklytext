@@ -114,6 +114,16 @@ class WikklyParser(Parser):
                 compiler.endParagraph()
                 self.in_paragraph = False
 
+        def close_any_open_list():
+            while list_stack[-1][0] in "NU":
+                kind,n = list_stack.pop()
+                if kind == 'N':
+                    compiler.endNListItem()
+                    compiler.endNList()
+                else:
+                    compiler.endUListItem()
+                    compiler.endUList()
+
         def get_macro_for(macro_name, macro_end):
             """
             Parse macro calls in Wikkly constructs that allow for a
@@ -187,7 +197,7 @@ class WikklyParser(Parser):
         compiler.begin_document(self.lexer)
 
         for tok in self.lexer.tokenize(source):
-            # print(tok)
+            ic(tok)
 
             # ply.lex.lex() puts the regex match object in
             # lexer.lexmatch if the token has an associated
@@ -197,14 +207,7 @@ class WikklyParser(Parser):
             # check for EOF or over time limit
             if tok is None:
                 # close any open lists
-                while list_stack[-1][0] in "NU":
-                    kind,n = list_stack.pop()
-                    if kind == 'N':
-                        compiler.endNListItem()
-                        compiler.endNList()
-                    else:
-                        compiler.endUListItem()
-                        compiler.endUList()
+                close_any_open_list()
 
                 # close any open tables
                 endTableCell()
@@ -351,9 +354,9 @@ class WikklyParser(Parser):
                 if not self.in_blockquote:
                     raise ParseError("Missing beginning of blockquote.",
                                      location=self.location)
-                if self.in_paragraph:
-                    compiler.endParagraph()
-                    self.in_paragraph = False
+
+                end_current_block()
+                close_any_open_list()
 
                 compiler.endBlockquote()
                 self.in_blockquote = False
