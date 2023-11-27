@@ -197,7 +197,7 @@ class WikklyParser(Parser):
         compiler.begin_document(self.lexer)
 
         for tok in self.lexer.tokenize(source):
-            ic(tok)
+            #ic(tok)
 
             # ply.lex.lex() puts the regex match object in
             # lexer.lexmatch if the token has an associated
