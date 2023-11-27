@@ -265,7 +265,7 @@ def t_N_LISTITEM(t):
     return t
 
 def t_U_LISTITEM(t):
-    r"^\s*[\*•]+\s*"
+    r"^\s*[-\*•]+\s*"
     t.rawtext = t.value
     t.value = t.value.strip()
     return t
@@ -386,7 +386,7 @@ def t_BLOCKQUOTE_START(t):
     )
     return t
 
-t_BLOCKQUOTE_END = r">>>\n"
+t_BLOCKQUOTE_END = r">>>[ \t]*(\n|$)"
 
 
 def t_CATCH_URL(t):
