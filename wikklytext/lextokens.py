@@ -214,7 +214,7 @@ t_SEPARATOR = r"^---[-]+\s*"
 
 t_BOLD = r"''"
 t_ITALIC = r"//"
-t_STRIKETHROUGH = r"--\s*[^\-\W]+|\[^\-\W]+\s*--"
+t_STRIKETHROUGH = r"--\s*[^\-\W]+|[^\-\W]+\s*--"
 t_UNDERLINE = r"__"
 t_SUPERSCRIPT = r"\^\^"
 t_SUBSCRIPT = r"~~"
