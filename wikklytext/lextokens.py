@@ -110,6 +110,7 @@ tokens = (
     'UNDERLINE',
     'SUPERSCRIPT',
     'SUBSCRIPT',
+    'SEPARATOR',
     'N_LISTITEM',
     'U_LISTITEM',
     'HEADING',
@@ -135,7 +136,6 @@ tokens = (
     #'C_COMMENT_END',
     'HTML_COMMENT_START',
     'HTML_COMMENT_END',
-    'SEPARATOR',
     'TABLEROW_START',
     'TABLEROW_END',
     'TABLE_END',
@@ -210,11 +210,11 @@ def t_TABLE_CAPTION(t):
     )
     return t
 
-t_SEPARATOR = r"^---[-]+\s*"
+t_SEPARATOR = r"^---[-]+[ \t]*\n"
 
 t_BOLD = r"''"
 t_ITALIC = r"//"
-t_STRIKETHROUGH = r"--\s*[^\-\W]+|[^\-\W]+\s*--"
+t_STRIKETHROUGH = r"--"
 t_UNDERLINE = r"__"
 t_SUPERSCRIPT = r"\^\^"
 t_SUBSCRIPT = r"~~"
@@ -259,13 +259,15 @@ t_WORD = r"[^\W_]+" # \w has the _ in it which is for underline.
 t_OTHER_CHARACTERS = r"."
 
 def t_N_LISTITEM(t):
-    r"^\s*[\#]+\s*"
+    r"^[ \t]*[\#]+[ \t]*"
     t.rawtext = t.value
     t.value = t.value.strip()
     return t
 
 def t_U_LISTITEM(t):
-    r"^\s*[-\*•]+\s*"
+    r"^[ \t]*[\*•]+[ \t]+"
+    # No “-” here. Overlaps with SEPARATOR AND STRIKETHROUGH.
+
     t.rawtext = t.value
     t.value = t.value.strip()
     return t
