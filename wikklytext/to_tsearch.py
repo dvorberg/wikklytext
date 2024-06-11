@@ -56,7 +56,7 @@ class TSearchCompiler(WikklyCompiler):
     def beginHighlight(self, style=None): self.writer.push_weight("C")
     def endHighlight(self): self.writer.pop_weight()
 
-    def begiList(self, listtype): pass
+    def beginList(self, listtype): pass
     def endList(self, listtype): pass
     def beginListItem(self, listtype): pass
     def endListItem(self, listtype): pass
