@@ -55,14 +55,11 @@ class TSearchCompiler(WikklyCompiler):
     def endSubscript(self): pass
     def beginHighlight(self, style=None): self.writer.push_weight("C")
     def endHighlight(self): self.writer.pop_weight()
-    def beginNList(self): pass
-    def endNList(self): pass
-    def beginNListItem(self, txt): pass
-    def endNListItem(self): pass
-    def beginUList(self): pass
-    def endUList(self): pass
-    def beginUListItem(self, txt): pass
-    def endUListItem(self): pass
+
+    def begiList(self, listtype): pass
+    def endList(self, listtype): pass
+    def beginListItem(self, listtype): pass
+    def endListItem(self, listtype): pass
 
     def beginHeading(self, level):
         if level < 3:

@@ -115,14 +115,10 @@ class WikklyParser(Parser):
                 self.in_paragraph = False
 
         def close_any_open_list():
-            while list_stack[-1][0] in "NU":
-                kind,n = list_stack.pop()
-                if kind == 'N':
-                    compiler.endNListItem()
-                    compiler.endNList()
-                else:
-                    compiler.endUListItem()
-                    compiler.endUList()
+            while list_stack[-1][0] != "X": # bottom of the stack
+                kind, n = list_stack.pop()
+                compiler.endListItem(kind)
+                compiler.endList(kind)
 
         def get_macro_for(macro_name, macro_end):
             """
@@ -197,8 +193,6 @@ class WikklyParser(Parser):
         compiler.begin_document(self.lexer)
 
         for tok in self.lexer.tokenize(source):
-            #ic(tok)
-
             # ply.lex.lex() puts the regex match object in
             # lexer.lexmatch if the token has an associated
             # function.
@@ -261,20 +255,12 @@ class WikklyParser(Parser):
             if last_token[0] == "EOLS" and list_stack[-1][1] >= 1:
                 # if new token not a listitem or there were multiple EOLs,
                 # close all lists
-                if tok.type not in ['N_LISTITEM',
-                                    'U_LISTITEM'] or len(last_token[1]) > 1:
+                if tok.type != 'LISTITEM' or len(last_token[1]) > 1:
                     #print "EOL CLOSE LISTS"
                     #print "STACK ",list_stack
 
                     # close all open lists
-                    while list_stack[-1][0] in "NU":
-                        kind,n = list_stack.pop()
-                        if kind == 'N':
-                            compiler.endNListItem()
-                            compiler.endNList()
-                        else:
-                            compiler.endUListItem()
-                            compiler.endUList()
+                    close_any_open_list()
 
             if tok.type == 'WORD':
                 assure_paragraph()
@@ -381,7 +367,7 @@ class WikklyParser(Parser):
                 compiler.beginDefinitionDef()
                 in_defdef = True
 
-            elif tok.type == 'N_LISTITEM':
+            elif tok.type == 'LISTITEM':
                 end_current_block()
 
                 #print "N_LISTITEM, VALUE ",tok.value, "STACK ",list_stack
@@ -408,131 +394,66 @@ class WikklyParser(Parser):
                 #        Close current list, pop TOS and start new list
                 #        (push self to TOS)
 
+                requested_listtype = tok.listtypes[-1]
+                parent_listtype = list_stack[-1][0]
+
                 # case 1:
-                if list_stack[-1][0] == 'N' \
+                if parent_listtype == requested_listtype \
                    and list_stack[-1][1] == len(tok.value):
-                    compiler.endNListItem()
-                    compiler.beginNListItem(tok.value)
+                    compiler.endListItem(parent_listtype)
+                    compiler.beginListItem(requested_listtype)
 
                 # case 2:
                 elif list_stack[-1][1] < len(tok.value):
-                    compiler.beginNList()
-                    compiler.beginNListItem(tok.value)
-                    list_stack.append( ('N',len(tok.value)) )
+                    compiler.beginList(requested_listtype)
+                    compiler.beginListItem(requested_listtype)
+                    list_stack.append( (requested_listtype, len(tok.value)) )
 
                 # case 3:
                 elif list_stack[-1][1] > len(tok.value):
-                    while (not(list_stack[-1][0] == 'N' \
+                    while (not(list_stack[-1][0] == requested_listtype \
                                and list_stack[-1][1] == len(tok.value))) \
-                               and list_stack[-1][0] in 'NU':
+                               and parent_listtype != "X": # X=bottom of stack
                             # watch for end of stack as well
 
                         # close TOS list
-                        if list_stack[-1][0] == 'N':
-                            compiler.endNListItem()
-                            compiler.endNList()
-                        else:
-                            compiler.endUListItem()
-                            compiler.endUList()
+                        compiler.endListItem(list_stack[-1][0])
+                        compiler.endList(list_stack[-1][0])
 
                         list_stack.pop()
 
                     # did I empty the stack?
-                    if list_stack[-1][0] != 'N':
+                    if list_stack[-1][0] != requested_listtype:
                         # yes, start new list
-                        compiler.beginNList()
+                        compiler.beginList(requested_listtype)
                     else:
                         # close current item
-                        compiler.endNListItem()
+                        compiler.endListItem(list_stack[-1][0])
 
-                    compiler.beginNListItem(tok.value)
+                    compiler.beginListItem(requested_listtype)
 
                     # do NOT push to stack since TOS is already correct
 
                 # case 4:
-                elif list_stack[-1][0] == 'U' \
+                elif parent_listtype == requested_listtype \
                      and list_stack[-1][1] == len(tok.value):
 
                     # close current list & pop TOS
-                    compiler.endUListItem()
-                    compiler.endUList()
+                    compiler.endListItem(parent_listtype)
+                    compiler.endList(parent_listtype)
                     list_stack.pop()
 
                     # start new list & item
-                    compiler.beginNList()
-                    compiler.beginNListItem(tok.value)
+                    compiler.beginList(requested_listtype)
+                    compiler.beginListItem(requested_listtype)
 
-                    list_stack.append( ('N',len(tok.value)) )
-
-                else:
-                    # cannot reach ... if my logic is correct :-)
-                    raise InternalError("** INTERNAL ERROR in N_LISTITEM **",
-                                        location=self.location)
-
-            elif tok.type == 'U_LISTITEM':
-                end_current_block()
-                # (see comments in N_LISTITEM)
-
-                # case 1:
-                if list_stack[-1][0] == 'U' \
-                   and list_stack[-1][1] == len(tok.value):
-                    compiler.endUListItem()
-                    compiler.beginUListItem(tok.value)
-
-                # case 2:
-                elif list_stack[-1][1] < len(tok.value):
-                    compiler.beginUList()
-                    compiler.beginUListItem(tok.value)
-                    list_stack.append( ('U',len(tok.value)) )
-
-                # case 3:
-                elif list_stack[-1][1] > len(tok.value):
-                    while (not(list_stack[-1][0] == 'U' \
-                               and list_stack[-1][1] == len(tok.value))) \
-                               and list_stack[-1][0] in 'NU':
-                            # watch for end of stack as well
-
-                        # close TOS list
-                        if list_stack[-1][0] == 'U':
-                            compiler.endUListItem()
-                            compiler.endUList()
-                        else:
-                            compiler.endNListItem()
-                            compiler.endNList()
-
-                        list_stack.pop()
-
-                    # did I empty the stack?
-                    if list_stack[-1][0] != 'U':
-                        # yes, start new list
-                        compiler.beginUList()
-                    else:
-                        # close current item
-                        compiler.endUListItem()
-
-                    compiler.beginUListItem(tok.value)
-
-                    # do NOT push to stack since TOS is already correct
-
-                # case 4:
-                elif list_stack[-1][0] == 'N' \
-                     and list_stack[-1][1] == len(tok.value):
-
-                    # close current list & pop TOS
-                    compiler.endNListItem()
-                    compiler.endNList()
-                    list_stack.pop()
-
-                    # start new list & item
-                    compiler.beginUList()
-                    compiler.beginUListItem(tok.value)
-
-                    list_stack.append( ('U',len(tok.value)) )
+                    list_stack.append( (requested_listtype, len(tok.value)) )
 
                 else:
                     # cannot reach ... if my logic is correct :-)
-                    raise InternalError("** INTERNAL ERROR in N_LISTITEM **",
+                    raise InternalError("** INTERNAL ERROR in LISTITEM **",
                                         location=self.location)
+
 
             elif tok.type == 'HEADING':
                 # inside a table, this is a regular char

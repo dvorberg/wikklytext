@@ -111,8 +111,7 @@ tokens = (
     'SUPERSCRIPT',
     'SUBSCRIPT',
     'SEPARATOR',
-    'N_LISTITEM',
-    'U_LISTITEM',
+    'LISTITEM',
     'HEADING',
     'D_TERM',
     'D_DEFINITION',
@@ -258,18 +257,28 @@ t_NULLDOT = r"^\s*\.\s*$"
 t_WORD = r"[^\W_]+" # \w has the _ in it which is for underline.
 t_OTHER_CHARACTERS = r"."
 
-def t_N_LISTITEM(t):
-    r"^[ \t]*[\#]+[ \t]*"
-    t.rawtext = t.value
-    t.value = t.value.strip()
-    return t
-
-def t_U_LISTITEM(t):
-    r"^[ \t]*[\*•]+[ \t]+"
+roman_numeral_re = re.compile("[Ⅰ-ↁ]")
+def t_LISTITEM(t):
+    r"^[\t ]*[\*\#•Ⅰ-ↁ]+[ \t]*"
     # No “-” here. Overlaps with SEPARATOR AND STRIKETHROUGH.
-
     t.rawtext = t.value
     t.value = t.value.strip()
+
+    # t.list_types contains a list of characters:
+    # "U" for an unnumbered list
+    # "N" for a numbered list
+    # "R" for a numbered list with roman numerals
+    def listtype(s):
+        if s in "*•":
+            return "U"
+        elif s == "#":
+            return "N"
+        elif roman_numeral_re.match(s) is not None:
+            return "R"
+        else:
+            raise NotImplementedError() # Can’t reach here.
+
+    t.listtypes = [ listtype(s) for s in t.value ]
     return t
 
 def t_HEADING(t):

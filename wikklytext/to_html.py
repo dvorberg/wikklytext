@@ -227,22 +227,24 @@ class HTMLCompiler(WikklyCompiler):
     word = _characters
     other_characters = _characters
 
-    def beginNList(self): self.open("ol")
-    def endNList(self): self.close("ol")
+    def beginList(self, listtype):
+        if listtype == "U":
+            self.open("ul")
+        elif listtype == "N":
+            self.open("ol")
+        elif listtype == "R":
+            self.open("ol", type="I")
 
-    def beginNListItem(self, txt):
+    def endList(self, listtype):
+        if listtype == "U":
+            self.close("ul")
+        else: # NR
+            self.close("ol")
+
+    def beginListItem(self, listtype):
         self.open("li")
 
-    def endNListItem(self):
-        self.close("li")
-
-    def beginUList(self): self.open("ul")
-    def endUList(self): self.close("ul")
-
-    def beginUListItem(self, txt):
-        self.open("li")
-
-    def endUListItem(self):
+    def endListItem(self, listtype):
         self.close("li")
 
     def beginHeading(self, level):
@@ -396,17 +398,14 @@ class InlineHTMLCompiler(HTMLCompiler):
 
 
 class CmdlineTool(CmdlineTool):
-    def make_context(self, extra_context):
-        self.context = extra_context or Context()
-
     def to_html(self, outfile, source):
         parser = WikklyParser()
         compiler = HTMLCompiler(self.context, outfile)
         compiler.compile(parser, source)
 
 
-def cmdline_main(context:Context=None):
-    cmdline_tool = CmdlineTool(context)
+def cmdline_main():
+    cmdline_tool = CmdlineTool()
     cmdline_tool()
 
 if __name__ == "__main__":

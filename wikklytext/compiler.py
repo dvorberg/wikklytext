@@ -76,29 +76,17 @@ class WikklyCompiler(Compiler):
     def endHighlight(self):
         print("endHighlight")
 
-    def beginNList(self):
-        print("begin N-list")
+    def beginList(self, listtype):
+        print("begin list", listtype)
 
-    def endNList(self):
-        print("end N-list")
+    def endList(self, listtype):
+        print("end list", listtype)
 
-    def beginNListItem(self, txt):
-        print("begin N-listitem:%s:" % txt)
+    def beginListItem(self, listtype):
+        print("begin-listitem ", listtype)
 
-    def endNListItem(self):
-        print("end N-listitem")
-
-    def beginUList(self):
-        print("begin U-list")
-
-    def endUList(self):
-        print("end U-list")
-
-    def beginUListItem(self, txt):
-        print("begin U-listitem:%s:" % txt)
-
-    def endUListItem(self):
-        print("end U-listitem")
+    def endListItem(self, listtype):
+        print("end listitem", listtype)
 
     def beginHeading(self, txt):
         print("beginHeading:%s:" % txt)
