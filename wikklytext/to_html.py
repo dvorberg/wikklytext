@@ -157,14 +157,6 @@ class Table(object):
             self.write_table()
 
 class HTMLCompiler(WikklyCompiler):
-    block_level_tags = { "div", "p", "ol", "ul", "li", "blockquote", "code",
-                         "table", "tbody", "thead", "tr", "td", "th",
-                         "dl", "dt", "dd",
-                         "h1", "h2", "h3", "h4", "h5", "h6", }
-
-    # Tags that like to stand on a line by themselves.
-    loner_tags = { "ol", "ul", "code", "table", "tbody", "thead", "tr", "dl",}
-
     def __init__(self, context, output):
         WikklyCompiler.__init__(self, context)
         self.writer = HTMLWriter(output, context.root_language)
@@ -390,7 +382,7 @@ class InlineHTMLCompiler(HTMLCompiler):
                                location=self.parser.location)
 
     def open(self, tag, **params):
-        if tag in self.block_level_tags:
+        if tag in self.writer.block_level_tags:
             raise RestrictionError("You may only use inline markup "
                                    "in this context.",
                                    location=self.parser.location)
