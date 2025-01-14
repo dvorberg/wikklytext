@@ -245,7 +245,7 @@ t_C_COMMENT_START = r'^\/\*\*\*\n'
 # this is caught as a special case of ^*
 #t_C_COMMENT_END = r'^\*\*\*\/\n'
 
-t_HTML_BREAK = r"<\s*br\s*[/]?\s*>"
+t_HTML_BREAK = r"<\s*br\s*[/]?\s*>[ ]*\n?"
 #t_HTML_START = r"<html>"
 #t_HTML_END = r"</html>"
 # TiddlyWiki does not allow nesting, so grab all at once
