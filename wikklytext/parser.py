@@ -405,6 +405,11 @@ class WikklyParser(Parser):
 
                 # case 2:
                 elif list_stack[-1][1] < len(tok.value):
+                    if len(tok.value) != list_stack[-1][1] + 1:
+                        raise ParseError("List depth can only increase by "
+                                         "one level at a time; a list must "
+                                         "start with a single item indicator.",
+                                         location=self.location)
                     compiler.beginList(requested_listtype)
                     compiler.beginListItem(requested_listtype)
                     list_stack.append( (requested_listtype, len(tok.value)) )
@@ -679,6 +684,12 @@ class WikklyParser(Parser):
 
             elif tok.type == "HTML_BREAK":
                 compiler.linebreak()
+                #while self.lexer.remainder and \
+                #      self.lexer.remainder[0] == " ":
+                #    self.lexer.remainder = self.lexer.remainder[1:]
+                #if self.lexer.remainder and \
+                #      self.lexer.remainder[0] == "\n":
+                #    self.lexer.remainder = self.lexer.remainder[1:]
 
             elif tok.type == 'EOLS':
                 # Do NOT handle lists here -
