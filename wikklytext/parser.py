@@ -475,6 +475,9 @@ class WikklyParser(Parser):
             elif tok.type == 'LINK_AB':
                 assure_paragraph()
                 text, target = tok.value
+                if not target:
+                    raise ParseError(f"Empty target for link to “{text}”",
+                                     location=self.location)
                 compiler.handleLink(text, target)
 
             elif tok.type == 'LINK_A':
