@@ -301,13 +301,13 @@ def t_D_DEFINITION(t):
 
 # link: [[A]]
 def t_LINK_A(t):
-    r"\[\[(?P<link_a>[^\|]+?)\]\]"
+    r"\[\[(?P<link_a>[^\|\[\]]+?)\]\]"
     t.value = t.lexer.lexmatch.groupdict()["link_a"]
     return t
 
 # link: [[A|B]]
 def t_LINK_AB(t):
-    r"\[\[(?P<link_b_text>.+?)\|(?P<link_b_target>.*?)\]\]"
+    r"\[\[(?P<link_b_text>[^\|\[\]]+?)\|(?P<link_b_target>.*?)\]\]"
     groupdict = t.lexer.lexmatch.groupdict()
     t.value = ( groupdict["link_b_text"], groupdict["link_b_target"], )
     return t
