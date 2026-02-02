@@ -64,7 +64,7 @@ class TableCell(object):
 class Table(object):
     def __init__(self, compiler):
         self.compiler = compiler
-        self.original_output = compiler.output
+        self.original_output = compiler.writer.output
         self._caption = None
         self.tag_params = {}
         self._rows = []
@@ -118,7 +118,7 @@ class Table(object):
         open("table", **self.tag_params)
 
         if self.caption:
-            print(f'<caption>{self.caption}</caption>')
+            self.print(f'<caption>{self.caption}</caption>')
 
         # Split table head and body.
         thead = []
@@ -148,7 +148,7 @@ class Table(object):
                                 location=self.compiler.location)
 
         # Restore the compiler’s output stream.
-        self.compiler.output = self.original_output
+        self.compiler.writer.output = self.original_output
 
         if self._rows:
             # This uses self.compiler.print()
