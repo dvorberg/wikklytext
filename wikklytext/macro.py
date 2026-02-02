@@ -61,7 +61,7 @@ class WikklyMacro(Macro):
     will have the current context as 2nd parameter. The same holds true for
     parameters hinted as WikklyMacro
     """
-    def tag_params(self, *args, **kw):
+    def tag_params(self, **kw):
         """
         Return a dict object mapping HTML attributes to values. These will
         be used to open an HTML tag in these contexts:
@@ -81,7 +81,7 @@ class WikklyMacro(Macro):
 
     def start_tag(self, *args, **kw):
         return html_start_tag(
-            self.tag, **self.tag_params(*args, **kw)) + self.end
+            self.tag, **self.tag_params(**kw)) + self.end
 
     @property
     def end_tag(self):
@@ -161,8 +161,8 @@ class LanguageMacro(DecoratorMacro):
     Base class for the languages used in a context. The macro’s name
     should be an ISO language code.
     """
-    def tag_params(self):
-        return { "lang": self.get_name(), }
+    def tag_params(self, **kw):
+        return { "lang": self.get_name(), }.update(kw)
 
     def add_searchable_text(self,
                             writer:TSearchWriter,
@@ -187,5 +187,5 @@ class ClassMacro(DecoratorMacro):
     def css_class(self):
         return self.get_name()
 
-    def tag_params(self):
-        return { "class": self.css_class(), }
+    def tag_params(self, **kw):
+        return { "class": self.css_class(), }.update(kw)
