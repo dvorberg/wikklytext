@@ -109,10 +109,6 @@ class WikklyCompiler(Compiler):
     def handleLink(self, target, text=None):
         print("handleLink target=%s, text=%s" % (target, text))
 
-    def handleImgLink(self, title, filename, url):
-        print("handleImgLink title=%s, filename=%s, url=%s" % (
-            title,filename,url))
-
     def beginCodeBlock(self):
         print("beginCodeBlock")
 
@@ -305,6 +301,7 @@ class WikklyCompiler(Compiler):
             return method(*args, **kw)
         except Exception as exc:
             if not isinstance(exc, MarkupError):
+                traceback.print_tb(exc.__traceback__)
                 raise ErrorInMacroCall(f"Error calling {method}",
                                        location=location) from exc
             else:
