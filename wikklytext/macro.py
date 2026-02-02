@@ -162,7 +162,7 @@ class LanguageMacro(DecoratorMacro):
     should be an ISO language code.
     """
     def tag_params(self, **kw):
-        return { "lang": self.get_name(), }.update(kw)
+        return kw | { "lang": self.get_name(), }
 
     def add_searchable_text(self,
                             writer:TSearchWriter,
@@ -188,4 +188,4 @@ class ClassMacro(DecoratorMacro):
         return self.get_name()
 
     def tag_params(self, **kw):
-        return { "class": self.css_class(), }.update(kw)
+        return kw | { "class": self.css_class(), }
