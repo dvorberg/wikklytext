@@ -118,7 +118,7 @@ class Table(object):
         open("table", **self.tag_params)
 
         if self.caption:
-            self.print(f'<caption>{self.caption}</caption>')
+            print(f'<caption>{self.caption}</caption>')
 
         # Split table head and body.
         thead = []
